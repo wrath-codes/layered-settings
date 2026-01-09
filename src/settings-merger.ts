@@ -65,7 +65,8 @@ export class SettingsMerger {
   private externalBaseline: Setting = {};
   private provenance: ProvenanceMap = new Map();
   private readonly DEBOUNCE_MS = 300;
-  private readonly CONFIG_DIR = 'layered-settings';
+  private readonly BASE_DIR = 'layered-settings';
+  private readonly CONFIG_DIR = 'layered-settings/settings';
   private readonly CONFIG_FILENAME = 'config.json';
   private readonly EXTERNAL_FILENAME = 'external.json';
 

@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
 import {
-  SettingsMerger,
-  setOutputChannel,
-  setDiagnosticCollection,
-} from './settings-merger';
+  ConflictCodeActionProvider,
+  initDiagnostics,
+} from './core/conflict-manager';
+import { SettingsProvider } from './providers/settings-provider';
+import { initLogger } from './utils/logger';
 
-let merger: SettingsMerger | null = null;
+let settingsProvider: SettingsProvider | null = null;
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -13,12 +14,12 @@ let diagnosticCollection: vscode.DiagnosticCollection;
 export function activate(context: vscode.ExtensionContext): void {
   outputChannel = vscode.window.createOutputChannel('Layered Settings');
   context.subscriptions.push(outputChannel);
-  setOutputChannel(outputChannel);
+  initLogger(outputChannel);
 
   diagnosticCollection =
     vscode.languages.createDiagnosticCollection('layered-settings');
   context.subscriptions.push(diagnosticCollection);
-  setDiagnosticCollection(diagnosticCollection);
+  initDiagnostics(diagnosticCollection);
 
   outputChannel.appendLine('Layered Settings: Activating...');
 
@@ -42,11 +43,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(statusBarItem);
 
   const folderPath = workspaceFolders[0].uri.fsPath;
-  merger = new SettingsMerger(folderPath, statusBarItem);
-  merger.initialize();
+  settingsProvider = new SettingsProvider(folderPath, statusBarItem);
+  settingsProvider.initialize();
 
   const codeActionProvider = vscode.languages.registerCodeActionsProvider(
-    { pattern: '**/.vscode/layered-settings/*.json' },
+    { pattern: '**/.vscode/layered-settings/**/*.json' },
     new ConflictCodeActionProvider(),
     { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] },
   );
@@ -55,8 +56,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const resolveCommand = vscode.commands.registerCommand(
     'layered-settings.resolveConflict',
     async (key: string, chosenFile: string, allFiles: string[]) => {
-      if (merger) {
-        await merger.resolveConflictAction(key, chosenFile, allFiles);
+      if (settingsProvider) {
+        await settingsProvider.resolveConflictAction(key, chosenFile, allFiles);
       }
     },
   );
@@ -65,9 +66,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const refreshCommand = vscode.commands.registerCommand(
     'layered-settings.refresh',
     async () => {
-      if (merger) {
+      if (settingsProvider) {
         statusBarItem.text = '$(sync~spin) Refreshing...';
-        await merger.refresh();
+        await settingsProvider.refresh();
         vscode.window.showInformationMessage('Layered Settings refreshed');
       }
     },
@@ -87,12 +88,13 @@ export function activate(context: vscode.ExtensionContext): void {
   const openConfigCommand = vscode.commands.registerCommand(
     'layered-settings.openConfig',
     async () => {
-      const configDir = vscode.Uri.joinPath(
+      const baseDir = vscode.Uri.joinPath(
         workspaceFolders[0].uri,
         '.vscode',
         'layered-settings',
       );
-      const configPath = vscode.Uri.joinPath(configDir, 'config.json');
+      const settingsDir = vscode.Uri.joinPath(baseDir, 'settings');
+      const configPath = vscode.Uri.joinPath(settingsDir, 'config.json');
 
       try {
         const doc = await vscode.workspace.openTextDocument(configPath);
@@ -105,7 +107,14 @@ export function activate(context: vscode.ExtensionContext): void {
         );
 
         if (create === 'Yes') {
-          await vscode.workspace.fs.createDirectory(configDir);
+          await vscode.workspace.fs.createDirectory(baseDir);
+          await vscode.workspace.fs.createDirectory(settingsDir);
+          await vscode.workspace.fs.createDirectory(
+            vscode.Uri.joinPath(baseDir, 'keybindings'),
+          );
+          await vscode.workspace.fs.createDirectory(
+            vscode.Uri.joinPath(baseDir, 'mcp'),
+          );
 
           const template = {
             root: true,
@@ -128,55 +137,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push({
     dispose: () => {
-      if (merger) {
-        merger.dispose();
+      if (settingsProvider) {
+        settingsProvider.dispose();
       }
     },
   });
 }
 
 export function deactivate(): void {
-  if (merger) {
-    merger.dispose();
-    merger = null;
+  if (settingsProvider) {
+    settingsProvider.dispose();
+    settingsProvider = null;
   }
 }
-
-class ConflictCodeActionProvider implements vscode.CodeActionProvider {
-  provideCodeActions(
-    document: vscode.TextDocument,
-    range: vscode.Range,
-    context: vscode.CodeActionContext,
-  ): vscode.CodeAction[] {
-    const actions: vscode.CodeAction[] = [];
-
-    for (const diagnostic of context.diagnostics) {
-      if (diagnostic.source !== 'layered-settings') continue;
-
-      const data = (diagnostic as { data?: ConflictData }).data;
-      if (!data) continue;
-
-      for (const file of data.allFiles) {
-        const action = new vscode.CodeAction(
-          `Keep "${data.key}" in ${file}`,
-          vscode.CodeActionKind.QuickFix,
-        );
-        action.command = {
-          command: 'layered-settings.resolveConflict',
-          title: `Resolve conflict for ${data.key}`,
-          arguments: [data.key, file, data.allFiles],
-        };
-        action.diagnostics = [diagnostic];
-        action.isPreferred = file === data.allFiles[0];
-        actions.push(action);
-      }
-    }
-
-    return actions;
-  }
-}
-
-type ConflictData = {
-  key: string;
-  allFiles: string[];
-};

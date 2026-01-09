@@ -22,7 +22,7 @@
     "layered"
   ],
   "activationEvents": [
-    "workspaceContains:.vscode/layered-settings/config.json",
+    "workspaceContains:.vscode/layered-settings/settings/config.json",
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
@@ -43,7 +43,7 @@
     ],
     "jsonValidation": [
       {
-        "fileMatch": ".vscode/layered-settings/*.json",
+        "fileMatch": ".vscode/layered-settings/**/*.json",
         "url": "./schema.json"
       }
     ]
