@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Layered Settings Configuration",
+  "description": "Configuration file for layered-settings VSCode extension",
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "boolean",
+      "description": "If true, stops looking for parent config files",
+      "default": false
+    },
+    "extends": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Path or URL to extend settings from"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Array of paths or URLs to extend settings from"
+        }
+      ],
+      "description": "Extend settings from another file (local path or URL)"
+    },
+    "settings": {
+      "type": "object",
+      "description": "VSCode settings to apply. These have highest priority.",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
