@@ -16,7 +16,7 @@ export class ConfigMerger {
   private resolving: Set<string> = new Set();
   private extendedFiles: Set<string> = new Set();
 
-  constructor(private readonly configDir: string) {}
+  constructor(private readonly configDir: string) { }
 
   async mergeFromConfig(configPath: string): Promise<void> {
     this.reset();
