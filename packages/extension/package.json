@@ -42,7 +42,9 @@
   },
   "scripts": {
     "build": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --no-sourcemap",
+    "build:test": "tsc -p tsconfig.test.json",
     "watch": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --no-sourcemap --watch",
+    "test": "bun run build && bun run build:test && vscode-test",
     "package": "bunx @vscode/vsce package --no-dependencies",
     "publish": "bunx @vscode/vsce publish --no-dependencies",
     "typecheck": "tsc --noEmit"
@@ -51,9 +53,13 @@
     "@layered/core": "workspace:*"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.0.0",
+    "mocha": "^11.7.5",
     "typescript": "^5.4.0"
   }
 }

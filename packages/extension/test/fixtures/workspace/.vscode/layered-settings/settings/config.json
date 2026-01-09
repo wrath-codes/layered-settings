@@ -1,0 +1,9 @@
+{
+  "extends": [
+    "base.json"
+  ],
+  "settings": {
+    "editor.fontSize": 14,
+    "editor.tabSize": 2
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "settings": {
+    "editor.wordWrap": "on",
+    "editor.minimap.enabled": false,
+    "files.autoSave": "afterDelay"
+  }
+}
