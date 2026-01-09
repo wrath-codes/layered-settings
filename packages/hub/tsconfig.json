@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@layered/core": ["../core/src"],
+      "@layered/core/effect": ["../core/src/effect"],
+      "@layered/core/*": ["../core/src/*"]
+    }
+  },
+  "include": ["src/**/*", "convex/**/*", "../core/src/**/*"]
+}

@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "outDir": "out",
+    "verbatimModuleSyntax": false,
+    "noUncheckedIndexedAccess": false,
+    "baseUrl": ".",
+    "paths": {
+      "@layered/core": ["../core/src"],
+      "@layered/core/*": ["../core/src/*"]
+    }
+  },
+  "include": ["src/**/*", "../core/src/**/*"]
+}

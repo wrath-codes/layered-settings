@@ -1,22 +1,78 @@
-import * as fs from 'node:fs';
-import * as https from 'node:https';
-import * as path from 'node:path';
-import * as vscode from 'vscode';
+import * as fs from "node:fs";
+import * as https from "node:https";
+import * as path from "node:path";
+import * as vscode from "vscode";
+import {
+  ConfigMergerCore,
+  deepEqual as coreDeepEqual,
+  type FileReader,
+  type MergerCallbacks,
+} from "@layered/core";
 import type {
   KeyProvenance,
   LayeredConfig,
   ProvenanceMap,
   Setting,
-} from './types';
-import { log, logError } from '../utils/logger';
+} from "./types";
+import { log, logError } from "../utils/logger";
+
+class NodeFileReader implements FileReader {
+  readFile(filePath: string): string | null {
+    try {
+      return fs.readFileSync(filePath, "utf8");
+    } catch {
+      return null;
+    }
+  }
+
+  exists(filePath: string): boolean {
+    return fs.existsSync(filePath);
+  }
+
+  resolvePath(base: string, relative: string): string {
+    return path.resolve(base, relative);
+  }
+
+  dirname(filePath: string): string {
+    return path.dirname(filePath);
+  }
+
+  basename(filePath: string): string {
+    return path.basename(filePath);
+  }
+
+  isAbsolute(filePath: string): boolean {
+    return path.isAbsolute(filePath);
+  }
+}
 
 export class ConfigMerger {
+  private core: ConfigMergerCore;
   private finalSettings: Setting = {};
   private provenance: ProvenanceMap = new Map();
   private resolving: Set<string> = new Set();
   private extendedFiles: Set<string> = new Set();
 
-  constructor(private readonly configDir: string) { }
+  constructor(private readonly configDir: string) {
+    const callbacks: MergerCallbacks = {
+      onCircularDependency: (p: string) => {
+        vscode.window.showWarningMessage(`Circular dependency detected: ${p}`);
+      },
+      onParseError: (p: string, error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Failed to parse ${p}: ${message}`);
+        logError(`Parse error for ${p}`, error);
+      },
+      onExtendNotFound: (p: string) => {
+        vscode.window.showErrorMessage(`Extended file not found: ${p}`);
+      },
+      onInvalidExtend: (msg: string) => {
+        vscode.window.showErrorMessage(msg);
+      },
+    };
+
+    this.core = new ConfigMergerCore(new NodeFileReader(), callbacks);
+  }
 
   async mergeFromConfig(configPath: string): Promise<void> {
     this.reset();
@@ -58,7 +114,7 @@ export class ConfigMerger {
 
   private async resolveConfigWithProvenance(
     configPath: string,
-    baseDir: string,
+    baseDir: string
   ): Promise<void> {
     const absolutePath = path.isAbsolute(configPath)
       ? configPath
@@ -66,7 +122,7 @@ export class ConfigMerger {
 
     if (this.resolving.has(absolutePath)) {
       vscode.window.showWarningMessage(
-        `Circular dependency detected: ${absolutePath}`,
+        `Circular dependency detected: ${absolutePath}`
       );
       return;
     }
@@ -83,10 +139,10 @@ export class ConfigMerger {
       const extendsList = Array.isArray(config.extends)
         ? config.extends
         : [config.extends];
-      const configDir = path.dirname(absolutePath);
+      const configFileDir = path.dirname(absolutePath);
 
       for (const extendPath of extendsList) {
-        await this.resolveExtendPath(extendPath, configDir);
+        await this.resolveExtendPath(extendPath, configFileDir);
       }
     }
 
@@ -100,14 +156,14 @@ export class ConfigMerger {
 
   private async resolveExtendPath(
     extendPath: string,
-    baseDir: string,
+    baseDir: string
   ): Promise<void> {
-    if (!extendPath.endsWith('.json')) {
-      vscode.window.showErrorMessage('extends must point to a .json file');
+    if (!extendPath.endsWith(".json")) {
+      vscode.window.showErrorMessage("extends must point to a .json file");
       return;
     }
 
-    if (extendPath.startsWith('http://') || extendPath.startsWith('https://')) {
+    if (extendPath.startsWith("http://") || extendPath.startsWith("https://")) {
       const settings = await this.fetchFromUrl(extendPath);
       this.mergeSettingsWithProvenance(settings, extendPath);
       return;
@@ -128,12 +184,12 @@ export class ConfigMerger {
 
   private mergeSettingsWithProvenance(
     settings: Setting,
-    sourceFile: string,
+    sourceFile: string
   ): void {
     for (const [key, value] of Object.entries(settings)) {
       const isLanguageSpecific = /^\[.+\]$/.test(key);
 
-      if (isLanguageSpecific && typeof value === 'object' && value !== null) {
+      if (isLanguageSpecific && typeof value === "object" && value !== null) {
         this.finalSettings[key] = this.finalSettings[key] || {};
         Object.assign(this.finalSettings[key] as object, value);
       } else if (Array.isArray(value)) {
@@ -180,12 +236,12 @@ export class ConfigMerger {
 
   private parseConfigFile(configPath: string): LayeredConfig | null {
     try {
-      const content = fs.readFileSync(configPath, 'utf8');
+      const content = fs.readFileSync(configPath, "utf8");
       return JSON.parse(content);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       vscode.window.showErrorMessage(
-        `Failed to parse ${configPath}: ${message}`,
+        `Failed to parse ${configPath}: ${message}`
       );
       logError(`Parse error for ${configPath}`, error);
       return null;
@@ -197,9 +253,9 @@ export class ConfigMerger {
       const request = https.get(url, (response) => {
         const chunks: Buffer[] = [];
 
-        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
 
-        response.on('end', () => {
+        response.on("end", () => {
           try {
             const data = Buffer.concat(chunks).toString();
             const config = JSON.parse(data) as LayeredConfig;
@@ -217,13 +273,13 @@ export class ConfigMerger {
           }
         });
 
-        response.on('error', () => {
+        response.on("error", () => {
           vscode.window.showErrorMessage(`Failed to fetch: ${url}`);
           resolve({});
         });
       });
 
-      request.on('error', () => {
+      request.on("error", () => {
         vscode.window.showErrorMessage(`Failed to fetch: ${url}`);
         resolve({});
       });
@@ -237,22 +293,4 @@ export class ConfigMerger {
   }
 }
 
-export function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== typeof b) return false;
-  if (typeof a !== 'object' || a === null || b === null) return false;
-
-  const aObj = a as Record<string, unknown>;
-  const bObj = b as Record<string, unknown>;
-  const aKeys = Object.keys(aObj);
-  const bKeys = Object.keys(bObj);
-
-  if (aKeys.length !== bKeys.length) return false;
-
-  for (const key of aKeys) {
-    if (!bKeys.includes(key)) return false;
-    if (!deepEqual(aObj[key], bObj[key])) return false;
-  }
-
-  return true;
-}
+export { coreDeepEqual as deepEqual };

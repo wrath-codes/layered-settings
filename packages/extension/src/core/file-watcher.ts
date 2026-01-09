@@ -1,5 +1,5 @@
-import * as vscode from 'vscode';
-import * as logger from '../utils/logger';
+import * as vscode from "vscode";
+import * as logger from "../utils/logger";
 
 export type WatchedFile = {
   path: string;
@@ -9,13 +9,13 @@ export type WatchedFile = {
 export class FileWatcherManager {
   private watchers: WatchedFile[] = [];
   private directoryWatcher: vscode.FileSystemWatcher | null = null;
-  private debounceTimer: NodeJS.Timeout | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly debounceMs: number;
 
   constructor(
     private readonly pattern: string,
     private readonly onChangeCallback: () => void,
-    debounceMs = 300,
+    debounceMs = 300
   ) {
     this.debounceMs = debounceMs;
   }
@@ -23,7 +23,7 @@ export class FileWatcherManager {
   setupDirectoryWatcher(): void {
     logger.log(`Setting up directory watcher for: ${this.pattern}`);
     this.directoryWatcher = vscode.workspace.createFileSystemWatcher(
-      this.pattern,
+      this.pattern
     );
 
     this.directoryWatcher.onDidCreate(() => this.debouncedCallback());
@@ -77,14 +77,14 @@ export class FileWatcherManager {
 export class SettingsFileWatcher {
   private settingsWatcher: vscode.FileSystemWatcher | null = null;
   private configChangeDisposable: vscode.Disposable | null = null;
-  private debounceTimer: NodeJS.Timeout | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly debounceMs: number;
 
   constructor(
     private readonly settingsPath: string,
     private readonly onChangeCallback: () => void,
     private readonly shouldSkip: () => boolean,
-    debounceMs = 300,
+    debounceMs = 300
   ) {
     this.debounceMs = debounceMs;
   }
@@ -92,30 +92,32 @@ export class SettingsFileWatcher {
   setup(): void {
     logger.log(`Setting up settings watcher for: ${this.settingsPath}`);
     this.settingsWatcher = vscode.workspace.createFileSystemWatcher(
-      this.settingsPath,
+      this.settingsPath
     );
 
     this.settingsWatcher.onDidChange(() => {
-      logger.log('settings.json changed (file watcher)');
+      logger.log("settings.json changed (file watcher)");
       this.debouncedCallback();
     });
     this.settingsWatcher.onDidCreate(() => {
-      logger.log('settings.json created (file watcher)');
+      logger.log("settings.json created (file watcher)");
       this.debouncedCallback();
     });
 
     this.configChangeDisposable = vscode.workspace.onDidChangeConfiguration(
       () => {
-        logger.log('Configuration changed (VSCode API)');
+        logger.log("Configuration changed (VSCode API)");
         this.debouncedCallback();
-      },
+      }
     );
   }
 
   private debouncedCallback(): void {
-    logger.log(`debouncedExternalCheck called, shouldSkip: ${this.shouldSkip()}`);
+    logger.log(
+      `debouncedExternalCheck called, shouldSkip: ${this.shouldSkip()}`
+    );
     if (this.shouldSkip()) {
-      logger.log('Skipping - currently applying settings');
+      logger.log("Skipping - currently applying settings");
       return;
     }
 
@@ -124,7 +126,7 @@ export class SettingsFileWatcher {
     }
 
     this.debounceTimer = setTimeout(() => {
-      logger.log('Debounce timer fired');
+      logger.log("Debounce timer fired");
       this.onChangeCallback();
     }, this.debounceMs);
   }

@@ -1,0 +1,24 @@
+{
+  "name": "@layered/hub",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/main.ts --outdir dist --target bun",
+    "dev": "bun run --watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "convex:dev": "bunx convex dev",
+    "convex:deploy": "bunx convex deploy"
+  },
+  "dependencies": {
+    "@layered/core": "workspace:*",
+    "effect": "^3.19.14",
+    "@effect/platform": "^0.94.1",
+    "@effect/platform-bun": "^0.87.0",
+    "@clerk/backend": "^1.21.0",
+    "convex": "^1.21.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.4.0"
+  }
+}

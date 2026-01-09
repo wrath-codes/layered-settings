@@ -1,0 +1,21 @@
+{
+  "name": "@layered/core",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schemas": "./src/schemas/index.ts",
+    "./merging": "./src/merging/index.ts",
+    "./effect": "./src/effect/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "^3.19.14"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,68 +1,21 @@
 {
-  "name": "layered-settings",
-  "displayName": "Layered Settings",
-  "description": "Extendable and nested settings for VSCode with full file watching",
-  "version": "0.1.0",
-  "publisher": "wrath-codes",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/wrath-codes/layered-settings"
-  },
-  "engines": {
-    "vscode": "^1.85.0"
-  },
-  "categories": [
-    "Other"
-  ],
-  "keywords": [
-    "settings",
-    "configuration",
-    "extends",
-    "inheritance",
-    "layered"
-  ],
-  "activationEvents": [
-    "workspaceContains:.vscode/layered-settings/settings/config.json",
-    "onStartupFinished"
-  ],
-  "main": "./out/extension.js",
-  "contributes": {
-    "commands": [
-      {
-        "command": "layered-settings.refresh",
-        "title": "Layered Settings: Refresh"
-      },
-      {
-        "command": "layered-settings.showStatus",
-        "title": "Layered Settings: Show Status"
-      },
-      {
-        "command": "layered-settings.openConfig",
-        "title": "Layered Settings: Open Config"
-      }
-    ],
-    "jsonValidation": [
-      {
-        "fileMatch": ".vscode/layered-settings/**/*.json",
-        "url": "./schema.json"
-      }
-    ]
-  },
+  "name": "layered-settings-monorepo",
+  "private": true,
+  "workspaces": ["packages/*"],
   "scripts": {
-    "vscode:prepublish": "bun run compile",
-    "compile": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --no-sourcemap",
-    "watch": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --no-sourcemap --watch",
-    "lint": "bunx @biomejs/biome lint src",
-    "format": "bunx @biomejs/biome format src --write",
-    "check": "bunx @biomejs/biome check src",
-    "package": "bunx @vscode/vsce package --no-dependencies",
-    "publish": "bunx @vscode/vsce publish --no-dependencies"
+    "build": "bun run --filter '*' build",
+    "build:core": "bun run --filter @layered/core build",
+    "build:extension": "bun run --filter @layered/extension build",
+    "build:hub": "bun run --filter @layered/hub build",
+    "dev:hub": "bun run --filter @layered/hub dev",
+    "package:extension": "bun run --filter @layered/extension package",
+    "lint": "bunx @biomejs/biome lint packages",
+    "format": "bunx @biomejs/biome format packages --write",
+    "check": "bunx @biomejs/biome check packages"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "@types/node": "^20.10.0",
-    "@types/vscode": "^1.85.0",
     "@biomejs/biome": "^1.9.0",
-    "@vscode/vsce": "^3.0.0"
+    "@types/bun": "latest",
+    "typescript": "^5.4.0"
   }
 }

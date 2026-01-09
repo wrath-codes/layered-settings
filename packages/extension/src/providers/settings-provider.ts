@@ -1,9 +1,9 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as vscode from 'vscode';
-import { ConfigMerger, deepEqual } from '../core/config-merger';
-import { createConflictDiagnostics } from '../core/conflict-manager';
-import { FileWatcherManager, SettingsFileWatcher } from '../core/file-watcher';
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as vscode from "vscode";
+import { ConfigMerger, deepEqual } from "../core/config-merger";
+import { createConflictDiagnostics } from "../core/conflict-manager";
+import { FileWatcherManager, SettingsFileWatcher } from "../core/file-watcher";
 import type {
   ConfigProvider,
   ExternalDelta,
@@ -11,12 +11,12 @@ import type {
   LayeredConfig,
   ProvenanceMap,
   Setting,
-} from '../core/types';
-import { log } from '../utils/logger';
+} from "../core/types";
+import { log } from "../utils/logger";
 
 export class SettingsProvider implements ConfigProvider {
   readonly configDir: string;
-  readonly configFilename = 'config.json';
+  readonly configFilename = "config.json";
 
   private merger: ConfigMerger;
   private fileWatcher: FileWatcherManager;
@@ -24,42 +24,43 @@ export class SettingsProvider implements ConfigProvider {
   private statusBarItem: vscode.StatusBarItem;
   private isApplyingSettings = false;
   private ownedKeys: Set<string> = new Set();
+  private previousOwnedKeys: Set<string> = new Set();
   private provenance: ProvenanceMap = new Map();
   private externalBaseline: Setting = {};
 
   constructor(
     private readonly folderPath: string,
-    statusBarItem: vscode.StatusBarItem,
+    statusBarItem: vscode.StatusBarItem
   ) {
     this.configDir = path.join(
       folderPath,
-      '.vscode',
-      'layered-settings',
-      'settings',
+      ".vscode",
+      "layered-settings",
+      "settings"
     );
     this.statusBarItem = statusBarItem;
 
     this.merger = new ConfigMerger(this.configDir);
 
     this.fileWatcher = new FileWatcherManager(
-      path.join(this.configDir, '**/*.json'),
-      () => this.rebuild(),
+      path.join(this.configDir, "**/*.json"),
+      () => this.rebuild()
     );
 
     this.settingsWatcher = new SettingsFileWatcher(
-      path.join(folderPath, '.vscode', 'settings.json'),
+      path.join(folderPath, ".vscode", "settings.json"),
       () => this.detectExternalChanges(),
-      () => this.isApplyingSettings,
+      () => this.isApplyingSettings
     );
   }
 
   async initialize(): Promise<void> {
-    log('Initializing SettingsProvider');
+    log("Initializing SettingsProvider");
     this.fileWatcher.setupDirectoryWatcher();
     this.settingsWatcher.setup();
     await this.rebuild();
     log(
-      `Initialization complete. Owned keys: ${this.ownedKeys.size}, Provenance: ${this.provenance.size}`,
+      `Initialization complete. Owned keys: ${this.ownedKeys.size}, Provenance: ${this.provenance.size}`
     );
   }
 
@@ -76,12 +77,13 @@ export class SettingsProvider implements ConfigProvider {
     const configPath = path.join(this.configDir, this.configFilename);
 
     if (!fs.existsSync(configPath)) {
-      this.updateStatusBar('$(info) No config found');
+      this.updateStatusBar("$(info) No config found");
       return;
     }
 
     await this.merger.mergeFromConfig(configPath);
 
+    this.previousOwnedKeys = this.ownedKeys;
     this.provenance = this.merger.getProvenance();
     this.ownedKeys = this.merger.getOwnedKeys();
 
@@ -100,7 +102,21 @@ export class SettingsProvider implements ConfigProvider {
     try {
       const config = vscode.workspace.getConfiguration();
       const settings = this.merger.getSettings();
+      const newKeys = new Set(Object.keys(settings));
 
+      // Remove keys that were previously owned but are no longer present
+      for (const key of this.previousOwnedKeys) {
+        if (!newKeys.has(key)) {
+          try {
+            await config.update(key, undefined, vscode.ConfigurationTarget.Workspace);
+            log(`Removed deleted setting: "${key}"`);
+          } catch (error) {
+            console.error(`Failed to remove setting "${key}":`, error);
+          }
+        }
+      }
+
+      // Apply current settings
       for (const [key, value] of Object.entries(settings)) {
         try {
           await config.update(key, value, vscode.ConfigurationTarget.Workspace);
@@ -111,7 +127,7 @@ export class SettingsProvider implements ConfigProvider {
 
       await this.updateExternalBaseline();
       this.updateStatusBar(
-        `$(check) ${Object.keys(settings).length} settings applied`,
+        `$(check) ${Object.keys(settings).length} settings applied`
       );
     } finally {
       this.isApplyingSettings = false;
@@ -124,9 +140,9 @@ export class SettingsProvider implements ConfigProvider {
   }
 
   private getWorkspaceSettingsObject(): Setting {
-    const settingsPath = path.join(this.folderPath, '.vscode', 'settings.json');
+    const settingsPath = path.join(this.folderPath, ".vscode", "settings.json");
     try {
-      const content = fs.readFileSync(settingsPath, 'utf8');
+      const content = fs.readFileSync(settingsPath, "utf8");
       return JSON.parse(content);
     } catch {
       return {};
@@ -144,10 +160,10 @@ export class SettingsProvider implements ConfigProvider {
   }
 
   private async detectExternalChanges(): Promise<void> {
-    log('detectExternalChanges called');
+    log("detectExternalChanges called");
 
     if (this.ownedKeys.size === 0) {
-      log('No owned keys, skipping');
+      log("No owned keys, skipping");
       return;
     }
 
@@ -156,7 +172,7 @@ export class SettingsProvider implements ConfigProvider {
     const ownedChanges = this.detectOwnedKeyChanges(workspaceSettings);
     if (ownedChanges.length > 0) {
       log(
-        `Processing owned changes: ${ownedChanges.map((c) => c.key).join(', ')}`,
+        `Processing owned changes: ${ownedChanges.map((c) => c.key).join(", ")}`
       );
       await this.handleOwnedKeyChanges(ownedChanges);
       return;
@@ -177,7 +193,7 @@ export class SettingsProvider implements ConfigProvider {
   }
 
   private detectOwnedKeyChanges(
-    workspaceSettings: Setting,
+    workspaceSettings: Setting
   ): Array<{ key: string; newValue: unknown; provenance: KeyProvenance }> {
     const changes: Array<{
       key: string;
@@ -200,13 +216,12 @@ export class SettingsProvider implements ConfigProvider {
       key: string;
       newValue: unknown;
       provenance: KeyProvenance;
-    }>,
+    }>
   ): Promise<void> {
     for (const change of changes) {
       const { key, newValue, provenance } = change;
 
       if (provenance.overrides.length > 0) {
-        // Has conflicts - let user resolve via diagnostics
         continue;
       }
 
@@ -218,7 +233,7 @@ export class SettingsProvider implements ConfigProvider {
 
   private async handleExternalDelta(
     delta: ExternalDelta,
-    externalNow: Setting,
+    externalNow: Setting
   ): Promise<void> {
     const addedKeys = Object.keys(delta.added);
     const changedKeys = Object.keys(delta.changed);
@@ -241,46 +256,46 @@ export class SettingsProvider implements ConfigProvider {
   }
 
   private async showFileQuickPick(
-    settingKeys: string[],
+    settingKeys: string[]
   ): Promise<string | undefined> {
     const existingFiles = this.getExistingConfigFiles();
 
     const items: vscode.QuickPickItem[] = [
       {
-        label: '$(add) Create new file...',
-        description: 'Create a new layered config file',
+        label: "$(add) Create new file...",
+        description: "Create a new layered config file",
         alwaysShow: true,
       },
-      { label: '', kind: vscode.QuickPickItemKind.Separator },
+      { label: "", kind: vscode.QuickPickItemKind.Separator },
       ...existingFiles.map((file) => ({
         label: `$(file) ${file}`,
-        description: path.join('.vscode', 'layered-settings', 'settings', file),
+        description: path.join(".vscode", "layered-settings", "settings", file),
       })),
     ];
 
     const keysPreview =
       settingKeys.length <= 3
-        ? settingKeys.join(', ')
-        : `${settingKeys.slice(0, 3).join(', ')}... (+${settingKeys.length - 3} more)`;
+        ? settingKeys.join(", ")
+        : `${settingKeys.slice(0, 3).join(", ")}... (+${settingKeys.length - 3} more)`;
 
     const picked = await vscode.window.showQuickPick(items, {
-      title: 'Capture External Settings',
+      title: "Capture External Settings",
       placeHolder: `Select destination for: ${keysPreview}`,
       ignoreFocusOut: true,
     });
 
     if (!picked) return undefined;
 
-    if (picked.label.includes('Create new file')) {
+    if (picked.label.includes("Create new file")) {
       const newFileName = await vscode.window.showInputBox({
-        prompt: 'Enter new config file name',
-        placeHolder: 'my-settings.json',
+        prompt: "Enter new config file name",
+        placeHolder: "my-settings.json",
         validateInput: (value) => {
-          if (!value) return 'File name is required';
-          if (!value.endsWith('.json')) return 'File must end with .json';
-          if (value === 'config.json') return 'Cannot use config.json';
-          if (existingFiles.includes(value)) return 'File already exists';
-          if (!/^[\w\-\.]+$/.test(value)) return 'Invalid file name';
+          if (!value) return "File name is required";
+          if (!value.endsWith(".json")) return "File must end with .json";
+          if (value === "config.json") return "Cannot use config.json";
+          if (existingFiles.includes(value)) return "File already exists";
+          if (!/^[\w\-\.]+$/.test(value)) return "Invalid file name";
           return undefined;
         },
       });
@@ -294,7 +309,7 @@ export class SettingsProvider implements ConfigProvider {
       return newFileName;
     }
 
-    return picked.label.replace('$(file) ', '');
+    return picked.label.replace("$(file) ", "");
   }
 
   private getExistingConfigFiles(): string[] {
@@ -304,19 +319,19 @@ export class SettingsProvider implements ConfigProvider {
       .readdirSync(this.configDir)
       .filter(
         (file) =>
-          file.endsWith('.json') && file !== 'config.json' && file !== '.json',
+          file.endsWith(".json") && file !== "config.json" && file !== ".json"
       );
   }
 
   private async captureToFile(
     fileName: string,
-    newSettings: Setting,
+    newSettings: Setting
   ): Promise<void> {
     const filePath = path.join(this.configDir, fileName);
 
     let current: LayeredConfig = { settings: {} };
     try {
-      const content = fs.readFileSync(filePath, 'utf8');
+      const content = fs.readFileSync(filePath, "utf8");
       current = JSON.parse(content);
     } catch {
       /* file may not exist */
@@ -331,7 +346,7 @@ export class SettingsProvider implements ConfigProvider {
     await this.refresh();
 
     vscode.window.showInformationMessage(
-      `Captured ${Object.keys(newSettings).length} setting(s) to ${fileName}`,
+      `Captured ${Object.keys(newSettings).length} setting(s) to ${fileName}`
     );
   }
 
@@ -340,7 +355,7 @@ export class SettingsProvider implements ConfigProvider {
     if (!fs.existsSync(configPath)) return;
 
     try {
-      const content = fs.readFileSync(configPath, 'utf8');
+      const content = fs.readFileSync(configPath, "utf8");
       const config: LayeredConfig = JSON.parse(content);
 
       const extendsList = Array.isArray(config.extends)
@@ -362,12 +377,12 @@ export class SettingsProvider implements ConfigProvider {
   private async updateSourceFile(
     fileName: string,
     key: string,
-    value: unknown,
+    value: unknown
   ): Promise<void> {
     const filePath = path.join(this.configDir, fileName);
 
     try {
-      const content = fs.readFileSync(filePath, 'utf8');
+      const content = fs.readFileSync(filePath, "utf8");
       const config: LayeredConfig = JSON.parse(content);
 
       if (!config.settings) {
@@ -386,7 +401,7 @@ export class SettingsProvider implements ConfigProvider {
   async resolveConflictAction(
     key: string,
     chosenFile: string,
-    allFiles: string[],
+    allFiles: string[]
   ): Promise<void> {
     const filesToRemoveFrom = allFiles.filter((f) => f !== chosenFile);
 
@@ -400,12 +415,12 @@ export class SettingsProvider implements ConfigProvider {
 
   private async removeKeyFromFile(
     key: string,
-    fileName: string,
+    fileName: string
   ): Promise<void> {
     const filePath = path.join(this.configDir, fileName);
 
     try {
-      const content = fs.readFileSync(filePath, 'utf8');
+      const content = fs.readFileSync(filePath, "utf8");
       const config: LayeredConfig = JSON.parse(content);
 
       if (config.settings && key in config.settings) {

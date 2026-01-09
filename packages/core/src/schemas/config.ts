@@ -24,12 +24,3 @@ export type ConflictData = {
   key: string;
   allFiles: string[];
 };
-
-export interface ConfigProvider {
-  readonly configDir: string;
-  readonly configFilename: string;
-
-  initialize(): Promise<void>;
-  refresh(): Promise<void>;
-  dispose(): void;
-}

@@ -1,0 +1,59 @@
+{
+  "name": "@layered/extension",
+  "displayName": "Layered Settings",
+  "description": "Extendable and nested settings for VSCode with full file watching",
+  "version": "0.1.0",
+  "publisher": "wrath-codes",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wrath-codes/layered-settings"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["settings", "configuration", "extends", "inheritance", "layered"],
+  "activationEvents": [
+    "workspaceContains:.vscode/layered-settings/settings/config.json",
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "layered-settings.refresh",
+        "title": "Layered Settings: Refresh"
+      },
+      {
+        "command": "layered-settings.showStatus",
+        "title": "Layered Settings: Show Status"
+      },
+      {
+        "command": "layered-settings.openConfig",
+        "title": "Layered Settings: Open Config"
+      }
+    ],
+    "jsonValidation": [
+      {
+        "fileMatch": ".vscode/layered-settings/**/*.json",
+        "url": "./schema.json"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --no-sourcemap",
+    "watch": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --no-sourcemap --watch",
+    "package": "bunx @vscode/vsce package --no-dependencies",
+    "publish": "bunx @vscode/vsce publish --no-dependencies",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@layered/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.4.0"
+  }
+}

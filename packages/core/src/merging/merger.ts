@@ -1,0 +1,253 @@
+import type {
+  KeyProvenance,
+  LayeredConfig,
+  ProvenanceMap,
+  Setting,
+} from "../schemas/config";
+
+export interface FileReader {
+  readFile(path: string): string | null;
+  exists(path: string): boolean;
+  resolvePath(base: string, relative: string): string;
+  dirname(path: string): string;
+  basename(path: string): string;
+  isAbsolute(path: string): boolean;
+}
+
+export interface MergerCallbacks {
+  onCircularDependency?(path: string): void;
+  onParseError?(path: string, error: unknown): void;
+  onExtendNotFound?(path: string): void;
+  onInvalidExtend?(message: string): void;
+}
+
+export class ConfigMergerCore {
+  private finalSettings: Setting = {};
+  private provenance: ProvenanceMap = new Map();
+  private resolving: Set<string> = new Set();
+  private extendedFiles: Set<string> = new Set();
+
+  constructor(
+    private readonly fileReader: FileReader,
+    private readonly callbacks: MergerCallbacks = {}
+  ) {}
+
+  async mergeFromConfig(configPath: string, baseDir: string): Promise<void> {
+    this.reset();
+    await this.resolveConfigWithProvenance(configPath, baseDir);
+  }
+
+  reset(): void {
+    this.finalSettings = {};
+    this.provenance = new Map();
+    this.resolving = new Set();
+    this.extendedFiles = new Set();
+  }
+
+  getSettings(): Setting {
+    return { ...this.finalSettings };
+  }
+
+  getProvenance(): ProvenanceMap {
+    return new Map(this.provenance);
+  }
+
+  getOwnedKeys(): Set<string> {
+    return new Set(Object.keys(this.finalSettings));
+  }
+
+  getExtendedFiles(): Set<string> {
+    return new Set(this.extendedFiles);
+  }
+
+  getConflictedKeys(): string[] {
+    const conflicted: string[] = [];
+    for (const [key, prov] of this.provenance.entries()) {
+      if (prov.overrides.length > 0) {
+        conflicted.push(key);
+      }
+    }
+    return conflicted;
+  }
+
+  private async resolveConfigWithProvenance(
+    configPath: string,
+    baseDir: string
+  ): Promise<void> {
+    const absolutePath = this.fileReader.isAbsolute(configPath)
+      ? configPath
+      : this.fileReader.resolvePath(baseDir, configPath);
+
+    if (this.resolving.has(absolutePath)) {
+      this.callbacks.onCircularDependency?.(absolutePath);
+      return;
+    }
+
+    this.resolving.add(absolutePath);
+
+    const config = this.parseConfigFile(absolutePath);
+    if (!config) {
+      this.resolving.delete(absolutePath);
+      return;
+    }
+
+    if (config.extends) {
+      const extendsList = Array.isArray(config.extends)
+        ? config.extends
+        : [config.extends];
+      const configDir = this.fileReader.dirname(absolutePath);
+
+      for (const extendPath of extendsList) {
+        await this.resolveExtendPath(extendPath, configDir);
+      }
+    }
+
+    if (config.settings) {
+      const fileName = this.fileReader.basename(absolutePath);
+      this.mergeSettingsWithProvenance(config.settings, fileName);
+    }
+
+    this.resolving.delete(absolutePath);
+  }
+
+  private async resolveExtendPath(
+    extendPath: string,
+    baseDir: string
+  ): Promise<void> {
+    if (!extendPath.endsWith(".json")) {
+      this.callbacks.onInvalidExtend?.("extends must point to a .json file");
+      return;
+    }
+
+    if (extendPath.startsWith("http://") || extendPath.startsWith("https://")) {
+      // URL fetching should be handled by the platform-specific implementation
+      return;
+    }
+
+    const resolved = this.fileReader.isAbsolute(extendPath)
+      ? extendPath
+      : this.fileReader.resolvePath(baseDir, extendPath);
+
+    if (!this.fileReader.exists(resolved)) {
+      this.callbacks.onExtendNotFound?.(resolved);
+      return;
+    }
+
+    this.extendedFiles.add(resolved);
+    await this.resolveConfigWithProvenance(
+      resolved,
+      this.fileReader.dirname(resolved)
+    );
+  }
+
+  private mergeSettingsWithProvenance(
+    settings: Setting,
+    sourceFile: string
+  ): void {
+    for (const [key, value] of Object.entries(settings)) {
+      const isLanguageSpecific = /^\[.+\]$/.test(key);
+
+      if (isLanguageSpecific && typeof value === "object" && value !== null) {
+        this.finalSettings[key] = this.finalSettings[key] || {};
+        Object.assign(this.finalSettings[key] as object, value);
+      } else if (Array.isArray(value)) {
+        const existingValue = this.finalSettings[key];
+        if (Array.isArray(existingValue)) {
+          this.finalSettings[key] = [...existingValue, ...value];
+        } else {
+          this.finalSettings[key] = value;
+        }
+
+        const existing = this.provenance.get(key);
+        if (existing) {
+          existing.winner = `${existing.winner}, ${sourceFile}`;
+          existing.winnerValue = this.finalSettings[key];
+        } else {
+          this.provenance.set(key, {
+            winner: sourceFile,
+            winnerValue: value,
+            overrides: [],
+          });
+        }
+      } else {
+        const existing = this.provenance.get(key);
+
+        if (existing) {
+          existing.overrides.push({
+            file: existing.winner,
+            value: existing.winnerValue,
+          });
+          existing.winner = sourceFile;
+          existing.winnerValue = value;
+        } else {
+          this.provenance.set(key, {
+            winner: sourceFile,
+            winnerValue: value,
+            overrides: [],
+          });
+        }
+
+        this.finalSettings[key] = value;
+      }
+    }
+  }
+
+  private parseConfigFile(configPath: string): LayeredConfig | null {
+    try {
+      const content = this.fileReader.readFile(configPath);
+      if (!content) return null;
+      return JSON.parse(content);
+    } catch (error) {
+      this.callbacks.onParseError?.(configPath, error);
+      return null;
+    }
+  }
+}
+
+export function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== "object" || a === null || b === null) return false;
+
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+
+  if (aKeys.length !== bKeys.length) return false;
+
+  for (const key of aKeys) {
+    if (!bKeys.includes(key)) return false;
+    if (!deepEqual(aObj[key], bObj[key])) return false;
+  }
+
+  return true;
+}
+
+export function diffObjects(
+  prev: Setting,
+  curr: Setting
+): { added: Setting; changed: Setting; removed: string[] } {
+  const added: Setting = {};
+  const changed: Setting = {};
+  const removed: string[] = [];
+
+  const prevKeys = new Set(Object.keys(prev));
+  const currKeys = new Set(Object.keys(curr));
+
+  for (const k of currKeys) {
+    if (!prevKeys.has(k)) {
+      added[k] = curr[k];
+    } else if (!deepEqual(prev[k], curr[k])) {
+      changed[k] = curr[k];
+    }
+  }
+
+  for (const k of prevKeys) {
+    if (!currKeys.has(k)) {
+      removed.push(k);
+    }
+  }
+
+  return { added, changed, removed };
+}

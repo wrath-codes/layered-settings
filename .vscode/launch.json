@@ -6,11 +6,11 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}"
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/extension"
       ],
       "sourceMaps": false,
       "outFiles": [],
-      "preLaunchTask": "bun: compile"
+      "preLaunchTask": "build:extension"
     }
   ]
 }

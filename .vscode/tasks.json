@@ -2,10 +2,10 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "bun: compile",
+      "label": "build:extension",
       "type": "shell",
       "command": "bun",
-      "args": ["run", "compile"],
+      "args": ["run", "--filter", "@layered/extension", "build"],
       "problemMatcher": [],
       "group": {
         "kind": "build",
@@ -13,10 +13,10 @@
       }
     },
     {
-      "label": "bun: watch",
+      "label": "watch:extension",
       "type": "shell",
       "command": "bun",
-      "args": ["run", "watch"],
+      "args": ["run", "--filter", "@layered/extension", "watch"],
       "isBackground": true,
       "problemMatcher": []
     }
