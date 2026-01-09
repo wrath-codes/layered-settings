@@ -61,13 +61,9 @@ export class ConfigMergerCore {
   }
 
   getConflictedKeys(): string[] {
-    const conflicted: string[] = [];
-    for (const [key, prov] of this.provenance.entries()) {
-      if (prov.overrides.length > 0) {
-        conflicted.push(key);
-      }
-    }
-    return conflicted;
+    return [...this.provenance.entries()]
+      .filter(([, prov]) => prov.overrides.length > 0)
+      .map(([key]) => key);
   }
 
   private async resolveConfigWithProvenance(
@@ -216,38 +212,26 @@ export function deepEqual(a: unknown, b: unknown): boolean {
 
   if (aKeys.length !== bKeys.length) return false;
 
-  for (const key of aKeys) {
-    if (!bKeys.includes(key)) return false;
-    if (!deepEqual(aObj[key], bObj[key])) return false;
-  }
-
-  return true;
+  return aKeys.every((key) => bKeys.includes(key) && deepEqual(aObj[key], bObj[key]));
 }
 
 export function diffObjects(
   prev: Setting,
   curr: Setting
 ): { added: Setting; changed: Setting; removed: string[] } {
-  const added: Setting = {};
-  const changed: Setting = {};
-  const removed: string[] = [];
-
   const prevKeys = new Set(Object.keys(prev));
   const currKeys = new Set(Object.keys(curr));
+  const currEntries = Object.entries(curr);
 
-  for (const k of currKeys) {
-    if (!prevKeys.has(k)) {
-      added[k] = curr[k];
-    } else if (!deepEqual(prev[k], curr[k])) {
-      changed[k] = curr[k];
-    }
-  }
+  const added = Object.fromEntries(
+    currEntries.filter(([k]) => !prevKeys.has(k))
+  );
 
-  for (const k of prevKeys) {
-    if (!currKeys.has(k)) {
-      removed.push(k);
-    }
-  }
+  const changed = Object.fromEntries(
+    currEntries.filter(([k]) => prevKeys.has(k) && !deepEqual(prev[k], curr[k]))
+  );
+
+  const removed = [...prevKeys].filter((k) => !currKeys.has(k));
 
   return { added, changed, removed };
 }

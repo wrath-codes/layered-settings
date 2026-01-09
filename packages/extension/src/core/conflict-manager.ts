@@ -65,13 +65,13 @@ async function findKeyPosition(
   try {
     const content = fs.readFileSync(filePath, "utf8");
     const lines = content.split("\n");
+    const keyPattern = new RegExp(`"${key}"\\s*:`);
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const keyPattern = new RegExp(`"${key}"\\s*:`);
-      const match = line?.match(keyPattern);
-      if (match && match.index !== undefined) {
-        return new vscode.Range(i, match.index, i, match.index + key.length + 2);
+    const lineIndex = lines.findIndex((line) => keyPattern.test(line));
+    if (lineIndex !== -1) {
+      const match = lines[lineIndex]?.match(keyPattern);
+      if (match?.index !== undefined) {
+        return new vscode.Range(lineIndex, match.index, lineIndex, match.index + key.length + 2);
       }
     }
   } catch {
@@ -87,30 +87,26 @@ export class ConflictCodeActionProvider implements vscode.CodeActionProvider {
     _range: vscode.Range,
     context: vscode.CodeActionContext
   ): vscode.CodeAction[] {
-    const actions: vscode.CodeAction[] = [];
+    return context.diagnostics
+      .filter((d) => d.source === "layered-settings")
+      .flatMap((diagnostic) => {
+        const data = (diagnostic as { data?: ConflictData }).data;
+        if (!data) return [];
 
-    for (const diagnostic of context.diagnostics) {
-      if (diagnostic.source !== "layered-settings") continue;
-
-      const data = (diagnostic as { data?: ConflictData }).data;
-      if (!data) continue;
-
-      for (const file of data.allFiles) {
-        const action = new vscode.CodeAction(
-          `Keep "${data.key}" in ${file}`,
-          vscode.CodeActionKind.QuickFix
-        );
-        action.command = {
-          command: "layered-settings.resolveConflict",
-          title: `Resolve conflict for ${data.key}`,
-          arguments: [data.key, file, data.allFiles],
-        };
-        action.diagnostics = [diagnostic];
-        action.isPreferred = file === data.allFiles[0];
-        actions.push(action);
-      }
-    }
-
-    return actions;
+        return data.allFiles.map((file) => {
+          const action = new vscode.CodeAction(
+            `Keep "${data.key}" in ${file}`,
+            vscode.CodeActionKind.QuickFix
+          );
+          action.command = {
+            command: "layered-settings.resolveConflict",
+            title: `Resolve conflict for ${data.key}`,
+            arguments: [data.key, file, data.allFiles],
+          };
+          action.diagnostics = [diagnostic];
+          action.isPreferred = file === data.allFiles[0];
+          return action;
+        });
+      });
   }
 }

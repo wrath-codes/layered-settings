@@ -1,14 +1,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { diffObjects } from "@layered/core";
 import { ConfigMerger, deepEqual } from "../core/config-merger";
 import { createConflictDiagnostics } from "../core/conflict-manager";
 import { FileWatcherManager, SettingsFileWatcher } from "../core/file-watcher";
 import type {
   ConfigProvider,
   ExternalDelta,
-  KeyProvenance,
   LayeredConfig,
+  OwnedKeyChange,
   ProvenanceMap,
   Setting,
 } from "../core/types";
@@ -150,13 +151,9 @@ export class SettingsProvider implements ConfigProvider {
   }
 
   private stripOwnedKeys(settings: Setting): Setting {
-    const result: Setting = {};
-    for (const [key, value] of Object.entries(settings)) {
-      if (!this.ownedKeys.has(key)) {
-        result[key] = value;
-      }
-    }
-    return result;
+    return Object.fromEntries(
+      Object.entries(settings).filter(([key]) => !this.ownedKeys.has(key))
+    );
   }
 
   private async detectExternalChanges(): Promise<void> {
@@ -179,7 +176,7 @@ export class SettingsProvider implements ConfigProvider {
     }
 
     const externalNow = this.stripOwnedKeys(workspaceSettings);
-    const delta = this.diffObjects(this.externalBaseline, externalNow);
+    const delta = diffObjects(this.externalBaseline, externalNow);
 
     if (
       Object.keys(delta.added).length === 0 &&
@@ -194,29 +191,19 @@ export class SettingsProvider implements ConfigProvider {
 
   private detectOwnedKeyChanges(
     workspaceSettings: Setting
-  ): Array<{ key: string; newValue: unknown; provenance: KeyProvenance }> {
-    const changes: Array<{
-      key: string;
-      newValue: unknown;
-      provenance: KeyProvenance;
-    }> = [];
-
-    for (const [key, prov] of this.provenance.entries()) {
-      const currentValue = workspaceSettings[key];
-      if (!deepEqual(currentValue, prov.winnerValue)) {
-        changes.push({ key, newValue: currentValue, provenance: prov });
-      }
-    }
-
-    return changes;
+  ): OwnedKeyChange[] {
+    return [...this.provenance.entries()]
+      .filter(([key]) => key in workspaceSettings)
+      .filter(([key, prov]) => !deepEqual(workspaceSettings[key], prov.winnerValue))
+      .map(([key, prov]) => ({
+        key,
+        newValue: workspaceSettings[key],
+        provenance: prov,
+      }));
   }
 
   private async handleOwnedKeyChanges(
-    changes: Array<{
-      key: string;
-      newValue: unknown;
-      provenance: KeyProvenance;
-    }>
+    changes: OwnedKeyChange[]
   ): Promise<void> {
     for (const change of changes) {
       const { key, newValue, provenance } = change;
@@ -379,6 +366,12 @@ export class SettingsProvider implements ConfigProvider {
     key: string,
     value: unknown
   ): Promise<void> {
+    // Never write undefined to source files - this would delete the key
+    if (value === undefined) {
+      log(`Skipping update for "${key}" - value is undefined`);
+      return;
+    }
+
     const filePath = path.join(this.configDir, fileName);
 
     try {
@@ -430,31 +423,6 @@ export class SettingsProvider implements ConfigProvider {
     } catch (error) {
       console.error(`Failed to remove key from ${fileName}:`, error);
     }
-  }
-
-  private diffObjects(prev: Setting, curr: Setting): ExternalDelta {
-    const added: Setting = {};
-    const changed: Setting = {};
-    const removed: string[] = [];
-
-    const prevKeys = new Set(Object.keys(prev));
-    const currKeys = new Set(Object.keys(curr));
-
-    for (const k of currKeys) {
-      if (!prevKeys.has(k)) {
-        added[k] = curr[k];
-      } else if (!deepEqual(prev[k], curr[k])) {
-        changed[k] = curr[k];
-      }
-    }
-
-    for (const k of prevKeys) {
-      if (!currKeys.has(k)) {
-        removed.push(k);
-      }
-    }
-
-    return { added, changed, removed };
   }
 
   private updateStatusBar(text: string): void {

@@ -34,14 +34,12 @@ export class FileWatcherManager {
   setupFileWatchers(filePaths: string[]): void {
     this.clearFileWatchers();
 
-    for (const filePath of filePaths) {
+    this.watchers = filePaths.map((filePath) => {
       const watcher = vscode.workspace.createFileSystemWatcher(filePath);
-
       watcher.onDidChange(() => this.debouncedCallback());
       watcher.onDidDelete(() => this.debouncedCallback());
-
-      this.watchers.push({ path: filePath, watcher });
-    }
+      return { path: filePath, watcher };
+    });
 
     logger.log(`Set up ${this.watchers.length} file watchers`);
   }
@@ -57,9 +55,7 @@ export class FileWatcherManager {
   }
 
   private clearFileWatchers(): void {
-    for (const watched of this.watchers) {
-      watched.watcher.dispose();
-    }
+    this.watchers.forEach((watched) => watched.watcher.dispose());
     this.watchers = [];
   }
 
