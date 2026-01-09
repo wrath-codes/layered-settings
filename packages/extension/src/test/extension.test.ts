@@ -118,6 +118,113 @@ suite("Layered Settings Extension", () => {
       "Show Status command should be registered"
     );
   });
+
+  test("array settings should be concatenated from multiple files", async function () {
+    this.timeout(15000);
+
+    // Add array to base.json
+    const basePath = path.join(configDir, "base.json");
+    const baseContent = fs.readFileSync(basePath, "utf8");
+    const baseConfig = JSON.parse(baseContent);
+    baseConfig.settings["files.exclude"] = ["*.log", "*.tmp"];
+    fs.writeFileSync(basePath, JSON.stringify(baseConfig, null, 2));
+
+    // Add array to config.json
+    const configPath = path.join(configDir, "config.json");
+    const configContent = fs.readFileSync(configPath, "utf8");
+    const config = JSON.parse(configContent);
+    config.settings["files.exclude"] = ["node_modules"];
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    await sleep(3000);
+
+    // Verify arrays are concatenated
+    const vsConfig = vscode.workspace.getConfiguration();
+    const filesExclude = vsConfig.get<string[]>("files.exclude");
+    assert.ok(Array.isArray(filesExclude), "files.exclude should be an array");
+    assert.ok(filesExclude.includes("*.log"), "Should include base array items");
+    assert.ok(filesExclude.includes("node_modules"), "Should include config array items");
+
+    // Clean up
+    delete baseConfig.settings["files.exclude"];
+    delete config.settings["files.exclude"];
+    fs.writeFileSync(basePath, JSON.stringify(baseConfig, null, 2));
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await sleep(2000);
+  });
+
+  test("language-specific settings should be merged", async function () {
+    this.timeout(15000);
+
+    // Add language-specific setting to base.json
+    const basePath = path.join(configDir, "base.json");
+    const baseContent = fs.readFileSync(basePath, "utf8");
+    const baseConfig = JSON.parse(baseContent);
+    baseConfig.settings["[typescript]"] = { "editor.formatOnSave": true };
+    fs.writeFileSync(basePath, JSON.stringify(baseConfig, null, 2));
+
+    // Add different language-specific setting to config.json
+    const configPath = path.join(configDir, "config.json");
+    const configContent = fs.readFileSync(configPath, "utf8");
+    const config = JSON.parse(configContent);
+    config.settings["[typescript]"] = { "editor.defaultFormatter": "esbenp.prettier-vscode" };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    await sleep(3000);
+
+    // Verify both settings are present (shallow merged)
+    const vsConfig = vscode.workspace.getConfiguration();
+    const tsSettings = vsConfig.get<Record<string, unknown>>("[typescript]");
+    assert.ok(tsSettings, "[typescript] settings should exist");
+    assert.strictEqual(tsSettings["editor.formatOnSave"], true, "Should have base setting");
+    assert.strictEqual(tsSettings["editor.defaultFormatter"], "esbenp.prettier-vscode", "Should have config setting");
+
+    // Clean up
+    delete baseConfig.settings["[typescript]"];
+    delete config.settings["[typescript]"];
+    fs.writeFileSync(basePath, JSON.stringify(baseConfig, null, 2));
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await sleep(2000);
+  });
+
+  test("conflicting keys should create diagnostics", async function () {
+    this.timeout(15000);
+
+    // Add same key to both files (creates conflict)
+    const basePath = path.join(configDir, "base.json");
+    const baseContent = fs.readFileSync(basePath, "utf8");
+    const baseConfig = JSON.parse(baseContent);
+    baseConfig.settings["editor.insertSpaces"] = false;
+    fs.writeFileSync(basePath, JSON.stringify(baseConfig, null, 2));
+
+    const configPath = path.join(configDir, "config.json");
+    const configContent = fs.readFileSync(configPath, "utf8");
+    const config = JSON.parse(configContent);
+    config.settings["editor.insertSpaces"] = true;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    await sleep(3000);
+
+    // Check for diagnostics
+    const baseUri = vscode.Uri.file(basePath);
+    const configUri = vscode.Uri.file(configPath);
+    const baseDiagnostics = vscode.languages.getDiagnostics(baseUri);
+    const configDiagnostics = vscode.languages.getDiagnostics(configUri);
+
+    // At least one file should have a diagnostic about the conflict
+    const hasConflictDiagnostic =
+      baseDiagnostics.some(d => d.source === "layered-settings") ||
+      configDiagnostics.some(d => d.source === "layered-settings");
+
+    assert.ok(hasConflictDiagnostic, "Should create diagnostics for conflicting keys");
+
+    // Clean up
+    delete baseConfig.settings["editor.insertSpaces"];
+    delete config.settings["editor.insertSpaces"];
+    fs.writeFileSync(basePath, JSON.stringify(baseConfig, null, 2));
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await sleep(2000);
+  });
 });
 
 function sleep(ms: number): Promise<void> {
