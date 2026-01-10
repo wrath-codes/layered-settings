@@ -4,7 +4,8 @@ export type {
   KeyProvenance, 
   ProvenanceMap, 
   ExternalDelta, 
-  ConflictData 
+  ConflictData,
+  ArraySegmentProvenance,
 } from "@layered/core";
 
 import type { KeyProvenance } from "@layered/core";

@@ -459,7 +459,7 @@ describe("ConfigMergerCore", () => {
       expect(keyProv?.overrides[1]).toEqual({ file: "/B.json", value: "B" });
     });
 
-    test("array keys - winner string concatenates file names", async () => {
+    test("array keys - winner is last contributing file", async () => {
       fileReader.addJsonFile("/config.json", {
         extends: "./base.json",
         settings: { plugins: ["c"] },
@@ -472,7 +472,119 @@ describe("ConfigMergerCore", () => {
 
       const provenance = merger.getProvenance();
       const pluginsProv = provenance.get("plugins");
-      expect(pluginsProv?.winner).toBe("/base.json, /config.json");
+      expect(pluginsProv?.winner).toBe("/config.json");
+    });
+
+    test("array keys - arraySegments tracks per-file contributions", async () => {
+      fileReader.addJsonFile("/config.json", {
+        extends: "./base.json",
+        settings: { plugins: ["c"] },
+      });
+      fileReader.addJsonFile("/base.json", {
+        settings: { plugins: ["a", "b"] },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      const provenance = merger.getProvenance();
+      const pluginsProv = provenance.get("plugins");
+      expect(pluginsProv?.arraySegments).toHaveLength(2);
+      expect(pluginsProv?.arraySegments?.[0]).toEqual({
+        sourceFile: "/base.json",
+        start: 0,
+        length: 2,
+      });
+      expect(pluginsProv?.arraySegments?.[1]).toEqual({
+        sourceFile: "/config.json",
+        start: 2,
+        length: 1,
+      });
+    });
+
+    test("array keys - winnerValue is full merged array", async () => {
+      fileReader.addJsonFile("/config.json", {
+        extends: "./base.json",
+        settings: { plugins: ["c"] },
+      });
+      fileReader.addJsonFile("/base.json", {
+        settings: { plugins: ["a", "b"] },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      const provenance = merger.getProvenance();
+      const pluginsProv = provenance.get("plugins");
+      expect(pluginsProv?.winnerValue).toEqual(["a", "b", "c"]);
+    });
+
+    test("array segments with three files in chain", async () => {
+      fileReader.addJsonFile("/A.json", {
+        extends: "./B.json",
+        settings: { items: ["fromA"] },
+      });
+      fileReader.addJsonFile("/B.json", {
+        extends: "./C.json",
+        settings: { items: ["fromB1", "fromB2"] },
+      });
+      fileReader.addJsonFile("/C.json", {
+        settings: { items: ["fromC"] },
+      });
+
+      await merger.mergeFromConfig("/A.json", "/");
+
+      const provenance = merger.getProvenance();
+      const itemsProv = provenance.get("items");
+      expect(itemsProv?.arraySegments).toHaveLength(3);
+      expect(itemsProv?.arraySegments?.[0]).toEqual({
+        sourceFile: "/C.json",
+        start: 0,
+        length: 1,
+      });
+      expect(itemsProv?.arraySegments?.[1]).toEqual({
+        sourceFile: "/B.json",
+        start: 1,
+        length: 2,
+      });
+      expect(itemsProv?.arraySegments?.[2]).toEqual({
+        sourceFile: "/A.json",
+        start: 3,
+        length: 1,
+      });
+      expect(itemsProv?.winnerValue).toEqual(["fromC", "fromB1", "fromB2", "fromA"]);
+    });
+
+    test("empty array - segment with length 0", async () => {
+      fileReader.addJsonFile("/config.json", {
+        settings: { items: [] },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      const provenance = merger.getProvenance();
+      const itemsProv = provenance.get("items");
+      expect(itemsProv?.arraySegments).toHaveLength(1);
+      expect(itemsProv?.arraySegments?.[0]).toEqual({
+        sourceFile: "/config.json",
+        start: 0,
+        length: 0,
+      });
+    });
+
+    test("single file array - one segment covering full array", async () => {
+      fileReader.addJsonFile("/config.json", {
+        settings: { items: ["a", "b", "c"] },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      const provenance = merger.getProvenance();
+      const itemsProv = provenance.get("items");
+      expect(itemsProv?.arraySegments).toHaveLength(1);
+      expect(itemsProv?.arraySegments?.[0]).toEqual({
+        sourceFile: "/config.json",
+        start: 0,
+        length: 3,
+      });
     });
 
     test("getConflictedKeys() returns keys with overrides", async () => {

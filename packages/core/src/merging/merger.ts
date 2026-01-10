@@ -1,4 +1,5 @@
 import type {
+  ArraySegmentProvenance,
   KeyProvenance,
   LayeredConfig,
   ProvenanceMap,
@@ -159,22 +160,42 @@ export class ConfigMergerCore {
         this.finalSettings[key] = this.finalSettings[key] || {};
         Object.assign(this.finalSettings[key] as object, value);
       } else if (Array.isArray(value)) {
+        // ARRAY HANDLING WITH SEGMENT PROVENANCE
         const existingValue = this.finalSettings[key];
-        if (Array.isArray(existingValue)) {
-          this.finalSettings[key] = [...existingValue, ...value];
-        } else {
-          this.finalSettings[key] = value;
-        }
+        const prevLength = Array.isArray(existingValue)
+          ? existingValue.length
+          : 0;
+
+        // Concatenate arrays
+        const merged = Array.isArray(existingValue)
+          ? [...existingValue, ...value]
+          : [...value];
+        this.finalSettings[key] = merged;
+
+        // Create segment for this contribution
+        const newSegment: ArraySegmentProvenance = {
+          sourceFile: normalizedPath,
+          start: prevLength,
+          length: value.length,
+        };
 
         const existing = this.provenance.get(key);
         if (existing) {
-          existing.winner = `${existing.winner}, ${normalizedPath}`;
-          existing.winnerValue = this.finalSettings[key];
+          // Append segment to existing provenance
+          if (!existing.arraySegments) {
+            existing.arraySegments = [];
+          }
+          existing.arraySegments.push(newSegment);
+          // winner is single path (last contributor), NOT comma-separated
+          existing.winner = normalizedPath;
+          // winnerValue = full merged array (not just this contribution)
+          existing.winnerValue = merged;
         } else {
           this.provenance.set(key, {
             winner: normalizedPath,
-            winnerValue: value,
+            winnerValue: merged,
             overrides: [],
+            arraySegments: [newSegment],
           });
         }
       } else {
