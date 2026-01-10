@@ -22,6 +22,27 @@ export interface MergerCallbacks {
   onInvalidExtend?(message: string): void;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function deepMergeInternal(base: unknown, override: unknown): unknown {
+  if (override === null || override === undefined) {
+    return override;
+  }
+  if (!isPlainObject(base) || !isPlainObject(override)) {
+    if (Array.isArray(base) && Array.isArray(override)) {
+      return [...base, ...override];
+    }
+    return override;
+  }
+  const result: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    result[key] = deepMergeInternal(base[key], value);
+  }
+  return result;
+}
+
 export class ConfigMergerCore {
   private finalSettings: Setting = {};
   private provenance: ProvenanceMap = new Map();
@@ -198,7 +219,29 @@ export class ConfigMergerCore {
             arraySegments: [newSegment],
           });
         }
+      } else if (isPlainObject(value)) {
+        // NESTED OBJECT HANDLING - deep merge
+        const existingValue = this.finalSettings[key];
+        const merged = deepMergeInternal(existingValue, value);
+        this.finalSettings[key] = merged;
+
+        const existing = this.provenance.get(key);
+        if (existing) {
+          existing.overrides.push({
+            file: existing.winner,
+            value: existing.winnerValue,
+          });
+          existing.winner = normalizedPath;
+          existing.winnerValue = merged;
+        } else {
+          this.provenance.set(key, {
+            winner: normalizedPath,
+            winnerValue: merged,
+            overrides: [],
+          });
+        }
       } else {
+        // SCALAR HANDLING - last write wins
         const existing = this.provenance.get(key);
 
         if (existing) {

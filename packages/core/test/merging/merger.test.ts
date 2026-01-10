@@ -917,4 +917,152 @@ describe("ConfigMergerCore", () => {
       expect(configWithFalseRoot.root).toBe(false);
     });
   });
+
+  describe("Nested Object Merging", () => {
+    test("nested objects are deep merged (child extends parent)", async () => {
+      fileReader.addJsonFile("/base.json", {
+        settings: {
+          "editor.codeActionsOnSave": {
+            "source.fixAll": true,
+            "source.sortImports": false,
+          },
+        },
+      });
+      fileReader.addJsonFile("/config.json", {
+        extends: "./base.json",
+        settings: {
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": true,
+          },
+        },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({
+        "editor.codeActionsOnSave": {
+          "source.fixAll": true,
+          "source.sortImports": false,
+          "source.organizeImports": true,
+        },
+      });
+    });
+
+    test("nested object child overrides parent value for same key", async () => {
+      fileReader.addJsonFile("/base.json", {
+        settings: {
+          "editor.codeActionsOnSave": {
+            "source.fixAll": true,
+          },
+        },
+      });
+      fileReader.addJsonFile("/config.json", {
+        extends: "./base.json",
+        settings: {
+          "editor.codeActionsOnSave": {
+            "source.fixAll": false,
+          },
+        },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({
+        "editor.codeActionsOnSave": {
+          "source.fixAll": false,
+        },
+      });
+    });
+
+    test("deeply nested objects merge at all levels", async () => {
+      fileReader.addJsonFile("/base.json", {
+        settings: {
+          "custom.config": {
+            level1: {
+              a: 1,
+              level2: {
+                b: 2,
+              },
+            },
+          },
+        },
+      });
+      fileReader.addJsonFile("/config.json", {
+        extends: "./base.json",
+        settings: {
+          "custom.config": {
+            level1: {
+              c: 3,
+              level2: {
+                d: 4,
+              },
+            },
+          },
+        },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({
+        "custom.config": {
+          level1: {
+            a: 1,
+            c: 3,
+            level2: {
+              b: 2,
+              d: 4,
+            },
+          },
+        },
+      });
+    });
+
+    test("nested arrays inside objects are concatenated", async () => {
+      fileReader.addJsonFile("/base.json", {
+        settings: {
+          "editor.rulers": {
+            columns: [80],
+          },
+        },
+      });
+      fileReader.addJsonFile("/config.json", {
+        extends: "./base.json",
+        settings: {
+          "editor.rulers": {
+            columns: [120],
+          },
+        },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({
+        "editor.rulers": {
+          columns: [80, 120],
+        },
+      });
+    });
+
+    test("child can set nested key to null to explicitly clear", async () => {
+      fileReader.addJsonFile("/base.json", {
+        settings: {
+          "editor.codeActionsOnSave": {
+            "source.fixAll": true,
+          },
+        },
+      });
+      fileReader.addJsonFile("/config.json", {
+        extends: "./base.json",
+        settings: {
+          "editor.codeActionsOnSave": null,
+        },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({
+        "editor.codeActionsOnSave": null,
+      });
+    });
+  });
 });
