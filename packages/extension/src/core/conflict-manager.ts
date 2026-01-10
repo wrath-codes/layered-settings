@@ -5,6 +5,7 @@ import type { ConflictData, ProvenanceMap } from "./types";
 import { log } from "../utils/logger";
 
 let diagnosticCollection: vscode.DiagnosticCollection | null = null;
+const diagnosticsByConfigDir = new Map<string, vscode.Uri[]>();
 
 export function initDiagnostics(collection: vscode.DiagnosticCollection): void {
   diagnosticCollection = collection;
@@ -15,7 +16,12 @@ export async function createConflictDiagnostics(
   provenance: ProvenanceMap,
   configDir: string
 ): Promise<void> {
-  diagnosticCollection?.clear();
+  // Clear only THIS folder's previous diagnostics
+  const previousUris = diagnosticsByConfigDir.get(configDir) ?? [];
+  for (const uri of previousUris) {
+    diagnosticCollection?.set(uri, []);
+  }
+  diagnosticsByConfigDir.set(configDir, []);
 
   if (conflicts.length === 0) {
     log("No conflicts detected");
@@ -57,9 +63,22 @@ export async function createConflictDiagnostics(
     }
   }
 
+  const newUris: vscode.Uri[] = [];
   for (const [filePath, diagnostics] of diagnosticsByFile) {
-    diagnosticCollection?.set(vscode.Uri.file(filePath), diagnostics);
+    const uri = vscode.Uri.file(filePath);
+    diagnosticCollection?.set(uri, diagnostics);
+    newUris.push(uri);
   }
+
+  diagnosticsByConfigDir.set(configDir, newUris);
+}
+
+export function clearDiagnosticsForConfigDir(configDir: string): void {
+  const uris = diagnosticsByConfigDir.get(configDir) ?? [];
+  for (const uri of uris) {
+    diagnosticCollection?.set(uri, []);
+  }
+  diagnosticsByConfigDir.delete(configDir);
 }
 
 async function findKeyPosition(

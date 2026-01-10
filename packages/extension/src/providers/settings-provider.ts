@@ -15,31 +15,34 @@ import type {
 } from "../core/types";
 import { log } from "../utils/logger";
 
+export type StatusKind = "ok" | "no-config" | "refreshing";
+
 export class SettingsProvider implements ConfigProvider {
   readonly configDir: string;
   readonly configFilename = "config.json";
 
+  private folderPath: string;
   private merger: ConfigMerger;
   private fileWatcher: FileWatcherManager;
   private settingsWatcher: SettingsFileWatcher;
-  private statusBarItem: vscode.StatusBarItem;
   private isApplyingSettings = false;
   private ownedKeys: Set<string> = new Set();
   private previousOwnedKeys: Set<string> = new Set();
   private provenance: ProvenanceMap = new Map();
   private externalBaseline: Setting = {};
+  private statusKind: StatusKind = "no-config";
 
   constructor(
-    private readonly folderPath: string,
-    statusBarItem: vscode.StatusBarItem
+    private readonly folder: vscode.WorkspaceFolder,
+    private readonly onStatusChange: (provider: SettingsProvider) => void
   ) {
+    this.folderPath = folder.uri.fsPath;
     this.configDir = path.join(
-      folderPath,
+      this.folderPath,
       ".vscode",
       "layered-settings",
       "settings"
     );
-    this.statusBarItem = statusBarItem;
 
     this.merger = new ConfigMerger(this.configDir);
 
@@ -49,10 +52,26 @@ export class SettingsProvider implements ConfigProvider {
     );
 
     this.settingsWatcher = new SettingsFileWatcher(
-      path.join(folderPath, ".vscode", "settings.json"),
+      path.join(this.folderPath, ".vscode", "settings.json"),
       () => this.detectExternalChanges(),
       () => this.isApplyingSettings
     );
+  }
+
+  getFolderName(): string {
+    return this.folder.name;
+  }
+
+  getFolderUri(): vscode.Uri {
+    return this.folder.uri;
+  }
+
+  getSettingsCount(): number {
+    return this.ownedKeys.size;
+  }
+
+  getStatusKind(): StatusKind {
+    return this.statusKind;
   }
 
   async initialize(): Promise<void> {
@@ -75,33 +94,61 @@ export class SettingsProvider implements ConfigProvider {
   }
 
   private async rebuild(): Promise<void> {
-    const configPath = path.join(this.configDir, this.configFilename);
+    this.statusKind = "refreshing";
+    this.onStatusChange(this);
 
-    if (!fs.existsSync(configPath)) {
-      this.updateStatusBar("$(info) No config found");
+    await this.merger.mergeFromWorkspaceFolder(this.folderPath);
+
+    const settings = this.merger.getSettings();
+
+    if (Object.keys(settings).length === 0) {
+      await this.cleanupPreviousSettings();
+      this.statusKind = "no-config";
+      this.onStatusChange(this);
       return;
     }
-
-    await this.merger.mergeFromConfig(configPath);
 
     this.previousOwnedKeys = this.ownedKeys;
     this.provenance = this.merger.getProvenance();
     this.ownedKeys = this.merger.getOwnedKeys();
 
     const conflicts = this.merger.getConflictedKeys();
-    await createConflictDiagnostics(conflicts, this.provenance, this.configDir);
+    await createConflictDiagnostics(conflicts, this.provenance, this.folderPath);
 
     await this.applySettings();
 
     const extendedFiles = [...this.merger.getExtendedFiles()];
-    this.fileWatcher.setupFileWatchers(extendedFiles);
+    const inheritedConfigs = this.merger.getInheritedConfigPaths();
+    this.fileWatcher.setupFileWatchers([...extendedFiles, ...inheritedConfigs]);
+
+    this.statusKind = "ok";
+    this.onStatusChange(this);
+  }
+
+  private async cleanupPreviousSettings(): Promise<void> {
+    const config = vscode.workspace.getConfiguration(undefined, this.folder.uri);
+
+    for (const key of this.previousOwnedKeys) {
+      try {
+        await config.update(key, undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+      } catch (error) {
+        console.error(`Failed to remove setting "${key}":`, error);
+      }
+    }
+
+    this.ownedKeys = new Set();
+    this.previousOwnedKeys = new Set();
+    this.provenance = new Map();
+    this.externalBaseline = {};
+
+    await createConflictDiagnostics([], new Map(), this.folderPath);
   }
 
   private async applySettings(): Promise<void> {
     this.isApplyingSettings = true;
 
     try {
-      const config = vscode.workspace.getConfiguration();
+      const config = vscode.workspace.getConfiguration(undefined, this.folder.uri);
       const settings = this.merger.getSettings();
       const newKeys = new Set(Object.keys(settings));
 
@@ -109,7 +156,7 @@ export class SettingsProvider implements ConfigProvider {
       for (const key of this.previousOwnedKeys) {
         if (!newKeys.has(key)) {
           try {
-            await config.update(key, undefined, vscode.ConfigurationTarget.Workspace);
+            await config.update(key, undefined, vscode.ConfigurationTarget.WorkspaceFolder);
             log(`Removed deleted setting: "${key}"`);
           } catch (error) {
             console.error(`Failed to remove setting "${key}":`, error);
@@ -120,16 +167,13 @@ export class SettingsProvider implements ConfigProvider {
       // Apply current settings
       for (const [key, value] of Object.entries(settings)) {
         try {
-          await config.update(key, value, vscode.ConfigurationTarget.Workspace);
+          await config.update(key, value, vscode.ConfigurationTarget.WorkspaceFolder);
         } catch (error) {
           console.error(`Failed to update setting "${key}":`, error);
         }
       }
 
       await this.updateExternalBaseline();
-      this.updateStatusBar(
-        `$(check) ${Object.keys(settings).length} settings applied`
-      );
     } finally {
       this.isApplyingSettings = false;
     }
@@ -194,7 +238,14 @@ export class SettingsProvider implements ConfigProvider {
   ): OwnedKeyChange[] {
     return [...this.provenance.entries()]
       .filter(([key]) => key in workspaceSettings)
-      .filter(([key, prov]) => !deepEqual(workspaceSettings[key], prov.winnerValue))
+      .filter(([key, prov]) => {
+        const currentValue = workspaceSettings[key];
+        // Skip arrays - ambiguous which file to write to
+        if (Array.isArray(currentValue) || Array.isArray(prov.winnerValue)) {
+          return false;
+        }
+        return !deepEqual(currentValue, prov.winnerValue);
+      })
       .map(([key, prov]) => ({
         key,
         newValue: workspaceSettings[key],
@@ -362,17 +413,14 @@ export class SettingsProvider implements ConfigProvider {
   }
 
   private async updateSourceFile(
-    fileName: string,
+    filePath: string,
     key: string,
     value: unknown
   ): Promise<void> {
-    // Never write undefined to source files - this would delete the key
     if (value === undefined) {
       log(`Skipping update for "${key}" - value is undefined`);
       return;
     }
-
-    const filePath = path.join(this.configDir, fileName);
 
     try {
       const content = fs.readFileSync(filePath, "utf8");
@@ -385,9 +433,12 @@ export class SettingsProvider implements ConfigProvider {
       config.settings[key] = value;
       fs.writeFileSync(filePath, JSON.stringify(config, null, 2));
 
-      log(`Updated "${key}" in ${fileName}`);
+      log(`Updated "${key}" in ${path.basename(filePath)}`);
     } catch (error) {
-      console.error(`Failed to update ${fileName}:`, error);
+      console.error(`Failed to update ${filePath}:`, error);
+      vscode.window.showWarningMessage(
+        `Could not update ${path.basename(filePath)}: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
     }
   }
 
@@ -408,10 +459,8 @@ export class SettingsProvider implements ConfigProvider {
 
   private async removeKeyFromFile(
     key: string,
-    fileName: string
+    filePath: string
   ): Promise<void> {
-    const filePath = path.join(this.configDir, fileName);
-
     try {
       const content = fs.readFileSync(filePath, "utf8");
       const config: LayeredConfig = JSON.parse(content);
@@ -419,14 +468,10 @@ export class SettingsProvider implements ConfigProvider {
       if (config.settings && key in config.settings) {
         delete config.settings[key];
         fs.writeFileSync(filePath, JSON.stringify(config, null, 2));
+        log(`Removed "${key}" from ${path.basename(filePath)}`);
       }
     } catch (error) {
-      console.error(`Failed to remove key from ${fileName}:`, error);
+      console.error(`Failed to remove key from ${filePath}:`, error);
     }
-  }
-
-  private updateStatusBar(text: string): void {
-    this.statusBarItem.text = text;
-    this.statusBarItem.show();
   }
 }

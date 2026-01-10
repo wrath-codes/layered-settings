@@ -225,6 +225,199 @@ suite("Layered Settings Extension", () => {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
     await sleep(2000);
   });
+
+  test("openConfig command should be available", async () => {
+    const commands = await vscode.commands.getCommands();
+    assert.ok(
+      commands.includes("layered-settings.openConfig"),
+      "Open Config command should be registered"
+    );
+  });
+
+  test("resolveConflict command should be available", async () => {
+    const commands = await vscode.commands.getCommands();
+    assert.ok(
+      commands.includes("layered-settings.resolveConflict"),
+      "Resolve Conflict command should be registered"
+    );
+  });
+
+  test("single folder with root: true works unchanged", async function () {
+    this.timeout(10000);
+
+    // Read current config to verify root property
+    const configPath = path.join(configDir, "config.json");
+    const content = fs.readFileSync(configPath, "utf8");
+    const config = JSON.parse(content);
+
+    // Config should have root: true (existing fixture)
+    assert.strictEqual(config.root, true, "Config should have root: true");
+
+    // Settings should still be applied
+    const vsConfig = vscode.workspace.getConfiguration();
+    assert.strictEqual(vsConfig.get("editor.fontSize"), 14);
+  });
+
+  test("child config overrides parent's settings", async function () {
+    this.timeout(15000);
+
+    // Add a setting to base.json that will be overridden
+    const basePath = path.join(configDir, "base.json");
+    const baseContent = fs.readFileSync(basePath, "utf8");
+    const baseConfig = JSON.parse(baseContent);
+    baseConfig.settings["editor.renderWhitespace"] = "none";
+    fs.writeFileSync(basePath, JSON.stringify(baseConfig, null, 2));
+
+    // Override in config.json
+    const configPath = path.join(configDir, "config.json");
+    const configContent = fs.readFileSync(configPath, "utf8");
+    const config = JSON.parse(configContent);
+    config.settings["editor.renderWhitespace"] = "all";
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    await sleep(3000);
+
+    // Verify child wins
+    const vsConfig = vscode.workspace.getConfiguration();
+    assert.strictEqual(
+      vsConfig.get("editor.renderWhitespace"),
+      "all",
+      "Child config should override parent"
+    );
+
+    // Clean up
+    delete baseConfig.settings["editor.renderWhitespace"];
+    delete config.settings["editor.renderWhitespace"];
+    fs.writeFileSync(basePath, JSON.stringify(baseConfig, null, 2));
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await sleep(2000);
+  });
+
+  test("config deletion removes all previously-owned settings", async function () {
+    this.timeout(20000);
+
+    // Add a unique setting
+    const configPath = path.join(configDir, "config.json");
+    const content = fs.readFileSync(configPath, "utf8");
+    const config = JSON.parse(content);
+    const originalSettings = { ...config.settings };
+
+    config.settings["editor.scrollBeyondLastLine"] = false;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await sleep(3000);
+
+    // Verify it was applied
+    let vsConfig = vscode.workspace.getConfiguration();
+    assert.strictEqual(vsConfig.get("editor.scrollBeyondLastLine"), false);
+
+    // Now remove all settings from config
+    config.settings = {};
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await sleep(3000);
+
+    // Setting should be removed (reverts to default)
+    vsConfig = vscode.workspace.getConfiguration();
+    const scrollBeyond = vsConfig.get("editor.scrollBeyondLastLine");
+    assert.notStrictEqual(scrollBeyond, false, "Setting should have been removed");
+
+    // Restore original settings
+    config.settings = originalSettings;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await sleep(2000);
+  });
+
+  test("arrays skip auto-writeback to avoid ambiguity", async function () {
+    this.timeout(15000);
+
+    // Add arrays to both files
+    const basePath = path.join(configDir, "base.json");
+    const baseContent = fs.readFileSync(basePath, "utf8");
+    const baseConfig = JSON.parse(baseContent);
+    baseConfig.settings["search.exclude"] = ["**/node_modules"];
+    fs.writeFileSync(basePath, JSON.stringify(baseConfig, null, 2));
+
+    const configPath = path.join(configDir, "config.json");
+    const configContent = fs.readFileSync(configPath, "utf8");
+    const config = JSON.parse(configContent);
+    config.settings["search.exclude"] = ["**/dist"];
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    await sleep(3000);
+
+    // Read the settings.json and modify the array
+    const settingsContent = fs.readFileSync(settingsPath, "utf8");
+    const settings = JSON.parse(settingsContent);
+    const originalArray = settings["search.exclude"];
+
+    // Modify in settings.json (simulating user edit)
+    settings["search.exclude"] = [...(originalArray || []), "**/build"];
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    await sleep(3000);
+
+    // Verify source files were NOT modified (arrays skip writeback)
+    const baseAfter = JSON.parse(fs.readFileSync(basePath, "utf8"));
+    const configAfter = JSON.parse(fs.readFileSync(configPath, "utf8"));
+
+    assert.deepStrictEqual(
+      baseAfter.settings["search.exclude"],
+      ["**/node_modules"],
+      "Base file should not be modified for array settings"
+    );
+    assert.deepStrictEqual(
+      configAfter.settings["search.exclude"],
+      ["**/dist"],
+      "Config file should not be modified for array settings"
+    );
+
+    // Clean up
+    delete baseConfig.settings["search.exclude"];
+    delete config.settings["search.exclude"];
+    fs.writeFileSync(basePath, JSON.stringify(baseConfig, null, 2));
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await sleep(2000);
+  });
+
+  test("scalar setting change in settings.json writes back to source file", async function () {
+    this.timeout(15000);
+
+    // Add a scalar setting
+    const configPath = path.join(configDir, "config.json");
+    const configContent = fs.readFileSync(configPath, "utf8");
+    const config = JSON.parse(configContent);
+    config.settings["editor.cursorBlinking"] = "blink";
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await sleep(3000);
+
+    // Read current settings.json
+    const settingsContent = fs.readFileSync(settingsPath, "utf8");
+    const settings = JSON.parse(settingsContent);
+
+    // Modify the scalar value in settings.json
+    settings["editor.cursorBlinking"] = "smooth";
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    await sleep(3000);
+
+    // Verify source file was updated
+    const configAfter = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    assert.strictEqual(
+      configAfter.settings["editor.cursorBlinking"],
+      "smooth",
+      "Source file should be updated with new value"
+    );
+
+    // Clean up
+    delete config.settings["editor.cursorBlinking"];
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await sleep(2000);
+  });
+
+  test("provider exposes folder name correctly", async function () {
+    this.timeout(5000);
+
+    // The workspace folder name should be available through the extension
+    assert.ok(workspaceFolder, "Workspace folder should exist");
+    assert.ok(workspaceFolder.name, "Workspace folder should have a name");
+  });
 });
 
 function sleep(ms: number): Promise<void> {

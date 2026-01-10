@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { ConfigMergerCore, type MergerCallbacks } from "../../src/merging/merger";
+import type { LayeredConfig } from "../../src/schemas/config";
 import { InMemoryFileReader } from "../mocks/in-memory-file-reader";
 
 describe("ConfigMergerCore", () => {
@@ -750,6 +751,58 @@ describe("ConfigMergerCore", () => {
       const keyProv = provenance.get("key");
       expect(keyProv?.winner).not.toContain("\\");
       expect(keyProv?.winner).toContain("/");
+    });
+
+    test("provenance stores absolute paths, not basenames", async () => {
+      fileReader.addJsonFile("/project/dir/config.json", {
+        extends: "./base.json",
+        settings: { fromConfig: true, shared: "config" },
+      });
+      fileReader.addJsonFile("/project/dir/base.json", {
+        settings: { fromBase: true, shared: "base" },
+      });
+
+      await merger.mergeFromConfig("/project/dir/config.json", "/project/dir");
+
+      const provenance = merger.getProvenance();
+
+      // Winner should be absolute path, not just "config.json"
+      const sharedProv = provenance.get("shared");
+      expect(sharedProv?.winner).toBe("/project/dir/config.json");
+      expect(sharedProv?.winner).not.toBe("config.json");
+
+      // Overrides should also be absolute paths
+      expect(sharedProv?.overrides[0].file).toBe("/project/dir/base.json");
+      expect(sharedProv?.overrides[0].file).not.toBe("base.json");
+
+      // All provenance entries should have absolute paths
+      const fromConfigProv = provenance.get("fromConfig");
+      expect(fromConfigProv?.winner.startsWith("/")).toBe(true);
+
+      const fromBaseProv = provenance.get("fromBase");
+      expect(fromBaseProv?.winner.startsWith("/")).toBe(true);
+    });
+  });
+
+  describe("LayeredConfig Type", () => {
+    test("root property is correctly typed as optional boolean", () => {
+      const configWithRoot: LayeredConfig = {
+        root: true,
+        settings: { key: "value" },
+      };
+      expect(configWithRoot.root).toBe(true);
+
+      const configWithoutRoot: LayeredConfig = {
+        settings: { key: "value" },
+      };
+      expect(configWithoutRoot.root).toBeUndefined();
+
+      const configWithFalseRoot: LayeredConfig = {
+        root: false,
+        extends: "./base.json",
+        settings: {},
+      };
+      expect(configWithFalseRoot.root).toBe(false);
     });
   });
 });
