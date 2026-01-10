@@ -43,6 +43,7 @@ class NodeFileReader implements FileReader {
 
 export class ConfigMerger {
   private core: ConfigMergerCore;
+  private inheritedConfigPaths: string[] = [];
 
   constructor(private readonly configDir: string) {
     const callbacks: MergerCallbacks = {
@@ -91,6 +92,60 @@ export class ConfigMerger {
 
   getConflictedKeys(): string[] {
     return this.core.getConflictedKeys();
+  }
+
+  private buildParentConfigChain(
+    workspaceFolder: string
+  ): { configPath: string; baseDir: string }[] {
+    const chain: { configPath: string; baseDir: string }[] = [];
+    let currentDir = workspaceFolder;
+
+    while (true) {
+      const configDir = path.join(
+        currentDir,
+        ".vscode",
+        "layered-settings",
+        "settings"
+      );
+      const configPath = path.join(configDir, "config.json");
+
+      if (fs.existsSync(configPath)) {
+        let rootFlag: boolean | undefined = undefined;
+        try {
+          const json = JSON.parse(fs.readFileSync(configPath, "utf8"));
+          rootFlag = json.root;
+        } catch {
+          // Let ConfigMergerCore handle parse errors later
+        }
+
+        chain.push({ configPath, baseDir: configDir });
+
+        if (rootFlag === true) break;
+      }
+
+      const parentDir = path.dirname(currentDir);
+      if (parentDir === currentDir) break; // filesystem root
+
+      currentDir = parentDir;
+    }
+
+    return chain.reverse(); // parent → child order
+  }
+
+  async mergeFromWorkspaceFolder(folderPath: string): Promise<void> {
+    const chain = this.buildParentConfigChain(folderPath);
+    this.inheritedConfigPaths = chain.map((c) => c.configPath);
+
+    if (chain.length === 0) {
+      this.core.reset();
+      return;
+    }
+
+    await this.core.mergeFromConfigChain(chain);
+  }
+
+  getInheritedConfigPaths(): string[] {
+    return [...this.inheritedConfigPaths];
   }
 }
 

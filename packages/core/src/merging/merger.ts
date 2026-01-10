@@ -32,9 +32,17 @@ export class ConfigMergerCore {
     private readonly callbacks: MergerCallbacks = {}
   ) {}
 
-  async mergeFromConfig(configPath: string, baseDir: string): Promise<void> {
+  async mergeFromConfigChain(
+    configs: { configPath: string; baseDir: string }[]
+  ): Promise<void> {
     this.reset();
-    await this.resolveConfigWithProvenance(configPath, baseDir);
+    for (const { configPath, baseDir } of configs) {
+      await this.resolveConfigWithProvenance(configPath, baseDir);
+    }
+  }
+
+  async mergeFromConfig(configPath: string, baseDir: string): Promise<void> {
+    await this.mergeFromConfigChain([{ configPath, baseDir }]);
   }
 
   reset(): void {
@@ -99,8 +107,7 @@ export class ConfigMergerCore {
     }
 
     if (config.settings) {
-      const fileName = this.fileReader.basename(absolutePath);
-      this.mergeSettingsWithProvenance(config.settings, fileName);
+      this.mergeSettingsWithProvenance(config.settings, absolutePath);
     }
 
     this.resolving.delete(absolutePath);
@@ -136,10 +143,15 @@ export class ConfigMergerCore {
     );
   }
 
+  private normalizePath(filePath: string): string {
+    return filePath.replace(/\\/g, "/");
+  }
+
   private mergeSettingsWithProvenance(
     settings: Setting,
-    sourceFile: string
+    sourcePath: string
   ): void {
+    const normalizedPath = this.normalizePath(sourcePath);
     for (const [key, value] of Object.entries(settings)) {
       const isLanguageSpecific = /^\[.+\]$/.test(key);
 
@@ -156,11 +168,11 @@ export class ConfigMergerCore {
 
         const existing = this.provenance.get(key);
         if (existing) {
-          existing.winner = `${existing.winner}, ${sourceFile}`;
+          existing.winner = `${existing.winner}, ${normalizedPath}`;
           existing.winnerValue = this.finalSettings[key];
         } else {
           this.provenance.set(key, {
-            winner: sourceFile,
+            winner: normalizedPath,
             winnerValue: value,
             overrides: [],
           });
@@ -173,11 +185,11 @@ export class ConfigMergerCore {
             file: existing.winner,
             value: existing.winnerValue,
           });
-          existing.winner = sourceFile;
+          existing.winner = normalizedPath;
           existing.winnerValue = value;
         } else {
           this.provenance.set(key, {
-            winner: sourceFile,
+            winner: normalizedPath,
             winnerValue: value,
             overrides: [],
           });

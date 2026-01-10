@@ -144,11 +144,11 @@ describe("Config Chain Integration", () => {
       const fontSizeProv = provenance.get("editor.fontSize");
 
       expect(fontSizeProv).toBeDefined();
-      expect(fontSizeProv!.winner).toBe("settings.json");
+      expect(fontSizeProv!.winner).toBe("/local/settings.json");
       expect(fontSizeProv!.winnerValue).toBe(16);
       expect(fontSizeProv!.overrides).toHaveLength(2);
-      expect(fontSizeProv!.overrides[0].value).toBe(12);
-      expect(fontSizeProv!.overrides[1].value).toBe(14);
+      expect(fontSizeProv!.overrides[0]).toEqual({ file: "/base/settings.json", value: 12 });
+      expect(fontSizeProv!.overrides[1]).toEqual({ file: "/workspace/settings.json", value: 14 });
     });
   });
 

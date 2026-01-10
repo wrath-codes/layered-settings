@@ -32,13 +32,17 @@ export async function createConflictDiagnostics(
 
     const allFiles = [prov.winner, ...prov.overrides.map((o: { file: string; value: unknown }) => o.file)];
 
-    for (const fileName of allFiles) {
-      const filePath = path.join(configDir, fileName);
+    for (const filePath of allFiles) {
+      // Provenance now stores absolute paths, use directly
+      if (!fs.existsSync(filePath)) continue;
       const position = await findKeyPosition(filePath, key);
 
+      const otherFiles = allFiles
+        .filter((f) => f !== filePath)
+        .map((f) => path.basename(f));
       const diagnostic = new vscode.Diagnostic(
         position,
-        `"${key}" is also defined in: ${allFiles.filter((f) => f !== fileName).join(", ")}`,
+        `"${key}" is also defined in: ${otherFiles.join(", ")}`,
         vscode.DiagnosticSeverity.Warning
       );
       diagnostic.source = "layered-settings";

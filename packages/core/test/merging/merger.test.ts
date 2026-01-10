@@ -141,10 +141,10 @@ describe("ConfigMergerCore", () => {
 
       const provenance = merger.getProvenance();
       const levelProv = provenance.get("level");
-      expect(levelProv?.winner).toBe("A.json");
+      expect(levelProv?.winner).toBe("/A.json");
       expect(levelProv?.overrides.length).toBe(2);
-      expect(levelProv?.overrides[0].file).toBe("C.json");
-      expect(levelProv?.overrides[1].file).toBe("B.json");
+      expect(levelProv?.overrides[0].file).toBe("/C.json");
+      expect(levelProv?.overrides[1].file).toBe("/B.json");
     });
 
     test("DAG extends (A extends B and C; C also extends B)", async () => {
@@ -412,7 +412,7 @@ describe("ConfigMergerCore", () => {
 
       const provenance = merger.getProvenance();
       const themeProv = provenance.get("theme");
-      expect(themeProv?.winner).toBe("config.json");
+      expect(themeProv?.winner).toBe("/config.json");
       expect(themeProv?.winnerValue).toBe("dark");
       expect(themeProv?.overrides).toEqual([]);
     });
@@ -430,9 +430,9 @@ describe("ConfigMergerCore", () => {
 
       const provenance = merger.getProvenance();
       const themeProv = provenance.get("theme");
-      expect(themeProv?.winner).toBe("config.json");
+      expect(themeProv?.winner).toBe("/config.json");
       expect(themeProv?.overrides.length).toBe(1);
-      expect(themeProv?.overrides[0]).toEqual({ file: "base.json", value: "light" });
+      expect(themeProv?.overrides[0]).toEqual({ file: "/base.json", value: "light" });
     });
 
     test("three+ files with same key - overrides chain is correct", async () => {
@@ -452,10 +452,10 @@ describe("ConfigMergerCore", () => {
 
       const provenance = merger.getProvenance();
       const keyProv = provenance.get("key");
-      expect(keyProv?.winner).toBe("A.json");
+      expect(keyProv?.winner).toBe("/A.json");
       expect(keyProv?.overrides.length).toBe(2);
-      expect(keyProv?.overrides[0]).toEqual({ file: "C.json", value: "C" });
-      expect(keyProv?.overrides[1]).toEqual({ file: "B.json", value: "B" });
+      expect(keyProv?.overrides[0]).toEqual({ file: "/C.json", value: "C" });
+      expect(keyProv?.overrides[1]).toEqual({ file: "/B.json", value: "B" });
     });
 
     test("array keys - winner string concatenates file names", async () => {
@@ -471,7 +471,7 @@ describe("ConfigMergerCore", () => {
 
       const provenance = merger.getProvenance();
       const pluginsProv = provenance.get("plugins");
-      expect(pluginsProv?.winner).toBe("base.json, config.json");
+      expect(pluginsProv?.winner).toBe("/base.json, /config.json");
     });
 
     test("getConflictedKeys() returns keys with overrides", async () => {
@@ -621,6 +621,135 @@ describe("ConfigMergerCore", () => {
       await merger.mergeFromConfig("/good.json", "/");
 
       expect(merger.getSettings()).toEqual({ valid: true });
+    });
+  });
+
+  describe("mergeFromConfigChain", () => {
+    test("chain of 3 configs merges in order (parent → child)", async () => {
+      fileReader.addJsonFile("/parent/config.json", {
+        settings: { level: "parent", parentOnly: true },
+      });
+      fileReader.addJsonFile("/middle/config.json", {
+        settings: { level: "middle", middleOnly: true },
+      });
+      fileReader.addJsonFile("/child/config.json", {
+        settings: { level: "child", childOnly: true },
+      });
+
+      await merger.mergeFromConfigChain([
+        { configPath: "/parent/config.json", baseDir: "/parent" },
+        { configPath: "/middle/config.json", baseDir: "/middle" },
+        { configPath: "/child/config.json", baseDir: "/child" },
+      ]);
+
+      const settings = merger.getSettings();
+      expect(settings.level).toBe("child");
+      expect(settings.parentOnly).toBe(true);
+      expect(settings.middleOnly).toBe(true);
+      expect(settings.childOnly).toBe(true);
+
+      const provenance = merger.getProvenance();
+      const levelProv = provenance.get("level");
+      expect(levelProv?.winner).toBe("/child/config.json");
+      expect(levelProv?.overrides).toHaveLength(2);
+      expect(levelProv?.overrides[0].file).toBe("/parent/config.json");
+      expect(levelProv?.overrides[1].file).toBe("/middle/config.json");
+    });
+
+    test("empty chain is no-op, returns empty settings", async () => {
+      await merger.mergeFromConfigChain([]);
+
+      expect(merger.getSettings()).toEqual({});
+      expect(merger.getProvenance().size).toBe(0);
+    });
+
+    test("each config's extends resolves within its layer", async () => {
+      fileReader.addJsonFile("/parent/config.json", {
+        extends: "./base.json",
+        settings: { fromParentConfig: true },
+      });
+      fileReader.addJsonFile("/parent/base.json", {
+        settings: { fromParentBase: true },
+      });
+      fileReader.addJsonFile("/child/config.json", {
+        extends: "./base.json",
+        settings: { fromChildConfig: true },
+      });
+      fileReader.addJsonFile("/child/base.json", {
+        settings: { fromChildBase: true },
+      });
+
+      await merger.mergeFromConfigChain([
+        { configPath: "/parent/config.json", baseDir: "/parent" },
+        { configPath: "/child/config.json", baseDir: "/child" },
+      ]);
+
+      const settings = merger.getSettings();
+      expect(settings.fromParentBase).toBe(true);
+      expect(settings.fromParentConfig).toBe(true);
+      expect(settings.fromChildBase).toBe(true);
+      expect(settings.fromChildConfig).toBe(true);
+    });
+
+    test("parse error in one config still applies others, fires callback", async () => {
+      const parseErrors: string[] = [];
+      callbacks.onParseError = (path) => parseErrors.push(path);
+
+      fileReader.addJsonFile("/good1/config.json", {
+        settings: { fromGood1: true },
+      });
+      fileReader.addFile("/bad/config.json", "{ invalid json }");
+      fileReader.addJsonFile("/good2/config.json", {
+        settings: { fromGood2: true },
+      });
+
+      await merger.mergeFromConfigChain([
+        { configPath: "/good1/config.json", baseDir: "/good1" },
+        { configPath: "/bad/config.json", baseDir: "/bad" },
+        { configPath: "/good2/config.json", baseDir: "/good2" },
+      ]);
+
+      expect(parseErrors).toContain("/bad/config.json");
+      expect(merger.getSettings().fromGood1).toBe(true);
+      expect(merger.getSettings().fromGood2).toBe(true);
+    });
+
+    test("two config.json files in different directories are distinguishable in provenance", async () => {
+      fileReader.addJsonFile("/projectA/config.json", {
+        settings: { shared: "A" },
+      });
+      fileReader.addJsonFile("/projectB/config.json", {
+        settings: { shared: "B" },
+      });
+
+      await merger.mergeFromConfigChain([
+        { configPath: "/projectA/config.json", baseDir: "/projectA" },
+        { configPath: "/projectB/config.json", baseDir: "/projectB" },
+      ]);
+
+      const provenance = merger.getProvenance();
+      const sharedProv = provenance.get("shared");
+      expect(sharedProv?.winner).toBe("/projectB/config.json");
+      expect(sharedProv?.overrides[0].file).toBe("/projectA/config.json");
+    });
+
+    test("path normalization converts backslashes to forward slashes", async () => {
+      fileReader.addJsonFile("/win/path/config.json", {
+        settings: { key: "value" },
+      });
+
+      const originalResolve = fileReader.resolvePath.bind(fileReader);
+      fileReader.resolvePath = (base: string, relative: string) => {
+        const result = originalResolve(base, relative);
+        return result.replace(/\//g, "\\");
+      };
+
+      await merger.mergeFromConfig("/win/path/config.json", "/win/path");
+
+      const provenance = merger.getProvenance();
+      const keyProv = provenance.get("key");
+      expect(keyProv?.winner).not.toContain("\\");
+      expect(keyProv?.winner).toContain("/");
     });
   });
 });
