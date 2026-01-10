@@ -2,6 +2,12 @@
   "editor.wordWrap": "on",
   "editor.minimap.enabled": false,
   "files.autoSave": "afterDelay",
+  "test.duplicate": [],
   "editor.fontSize": 14,
-  "editor.tabSize": 2
+  "editor.tabSize": 2,
+  "editor.rulers": [
+    100,
+    80,
+    120
+  ]
 }

@@ -50,7 +50,11 @@ function createProviderForFolder(
 
   outputChannel.appendLine(`Creating provider for: ${folder.uri.fsPath}`);
 
-  const provider = new SettingsProvider(folder, handleProviderStatusChange);
+  const provider = new SettingsProvider(
+    folder,
+    handleProviderStatusChange,
+    context.storageUri
+  );
   settingsProviders.set(key, provider);
 
   provider.initialize().catch((err) => {

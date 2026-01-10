@@ -1,0 +1,13 @@
+{
+  "root": true,
+  "settings": {
+    "editor.fontSize": 14,
+    "files.exclude": [
+      "*.log",
+      "*.tmp"
+    ],
+    "editor.rulers": [
+      80
+    ]
+  }
+}

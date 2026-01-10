@@ -38,7 +38,17 @@
         "fileMatch": ".vscode/layered-settings/**/*.json",
         "url": "./schema.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Layered Settings",
+      "properties": {
+        "layered-settings.autoGitignore": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically add layered.json to .gitignore when auto-capturing settings"
+        }
+      }
+    }
   },
   "scripts": {
     "build": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --no-sourcemap",

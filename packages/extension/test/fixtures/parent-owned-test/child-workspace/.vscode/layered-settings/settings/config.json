@@ -1,18 +1,14 @@
 {
   "root": true,
   "extends": [
-    "base.json"
+    "../../../../shared-configs/root-config.json"
   ],
   "settings": {
-    "editor.fontSize": 14,
     "editor.tabSize": 2,
-    "test.duplicate": [],
-    "test.restore": [
-      "a",
-      "b"
+    "files.exclude": [
+      "node_modules"
     ],
     "editor.rulers": [
-      80,
       120
     ]
   }

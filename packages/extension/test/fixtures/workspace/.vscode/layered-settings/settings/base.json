@@ -2,6 +2,10 @@
   "settings": {
     "editor.wordWrap": "on",
     "editor.minimap.enabled": false,
-    "files.autoSave": "afterDelay"
+    "files.autoSave": "afterDelay",
+    "test.duplicate": [],
+    "editor.rulers": [
+      100
+    ]
   }
 }

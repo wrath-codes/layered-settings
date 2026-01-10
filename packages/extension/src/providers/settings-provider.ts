@@ -1,13 +1,17 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { diffObjects } from "@layered/core";
+import { diffArrays, diffObjects } from "@layered/core";
+import { BackupManager } from "../core/backup-manager";
+import { CaptureFileManager } from "../core/capture-file-manager";
 import { ConfigMerger, deepEqual } from "../core/config-merger";
 import { createConflictDiagnostics } from "../core/conflict-manager";
 import { FileWatcherManager, SettingsFileWatcher } from "../core/file-watcher";
 import type {
+  ArraySegmentProvenance,
   ConfigProvider,
   ExternalDelta,
+  KeyProvenance,
   LayeredConfig,
   OwnedKeyChange,
   ProvenanceMap,
@@ -23,6 +27,8 @@ export class SettingsProvider implements ConfigProvider {
 
   private folderPath: string;
   private merger: ConfigMerger;
+  private captureFileManager: CaptureFileManager;
+  private backupManager: BackupManager | null = null;
   private fileWatcher: FileWatcherManager;
   private settingsWatcher: SettingsFileWatcher;
   private isApplyingSettings = false;
@@ -31,10 +37,12 @@ export class SettingsProvider implements ConfigProvider {
   private provenance: ProvenanceMap = new Map();
   private externalBaseline: Setting = {};
   private statusKind: StatusKind = "no-config";
+  private previousLayeredJsonSettings: Record<string, unknown> = {};
 
   constructor(
     private readonly folder: vscode.WorkspaceFolder,
-    private readonly onStatusChange: (provider: SettingsProvider) => void
+    private readonly onStatusChange: (provider: SettingsProvider) => void,
+    storageUri?: vscode.Uri
   ) {
     this.folderPath = folder.uri.fsPath;
     this.configDir = path.join(
@@ -45,6 +53,11 @@ export class SettingsProvider implements ConfigProvider {
     );
 
     this.merger = new ConfigMerger(this.configDir);
+    this.captureFileManager = new CaptureFileManager(this.configDir);
+
+    if (storageUri) {
+      this.backupManager = new BackupManager(storageUri);
+    }
 
     this.fileWatcher = new FileWatcherManager(
       path.join(this.configDir, "**/*.json"),
@@ -97,6 +110,11 @@ export class SettingsProvider implements ConfigProvider {
     this.statusKind = "refreshing";
     this.onStatusChange(this);
 
+    // Backup layered.json before rebuild (if it exists)
+    if (this.backupManager) {
+      await this.backupManager.backupLayeredJson(this.configDir);
+    }
+
     await this.merger.mergeFromWorkspaceFolder(this.folderPath);
 
     const settings = this.merger.getSettings();
@@ -107,6 +125,21 @@ export class SettingsProvider implements ConfigProvider {
       this.onStatusChange(this);
       return;
     }
+
+    // Check for layered.json deletion
+    if (this.backupManager) {
+      const wasDeleted = this.backupManager.detectLayeredJsonDeletion(
+        this.configDir,
+        this.previousLayeredJsonSettings
+      );
+      if (wasDeleted) {
+        this.backupManager.warnLayeredJsonDeleted();
+      }
+    }
+
+    // Update previousLayeredJsonSettings for next rebuild
+    this.previousLayeredJsonSettings =
+      this.captureFileManager.getLayeredJsonSettings();
 
     this.previousOwnedKeys = this.ownedKeys;
     this.provenance = this.merger.getProvenance();
@@ -210,6 +243,19 @@ export class SettingsProvider implements ConfigProvider {
 
     const workspaceSettings = this.getWorkspaceSettingsObject();
 
+    // Process array changes first (they have special segment-based handling)
+    const arrayChanges = this.detectArrayChanges(workspaceSettings);
+    if (arrayChanges.length > 0) {
+      log(
+        `Processing array changes: ${arrayChanges.map((c) => c.key).join(", ")}`
+      );
+      for (const change of arrayChanges) {
+        await this.handleArrayChange(change.key, change.newArray, change.provenance);
+      }
+      return;
+    }
+
+    // Process scalar owned key changes
     const ownedChanges = this.detectOwnedKeyChanges(workspaceSettings);
     if (ownedChanges.length > 0) {
       log(
@@ -251,6 +297,232 @@ export class SettingsProvider implements ConfigProvider {
         newValue: workspaceSettings[key],
         provenance: prov,
       }));
+  }
+
+  private detectArrayChanges(
+    workspaceSettings: Setting
+  ): Array<{ key: string; newArray: unknown[]; provenance: KeyProvenance }> {
+    return [...this.provenance.entries()]
+      .filter(([key]) => key in workspaceSettings)
+      .filter(([, prov]) => Array.isArray(prov.winnerValue))
+      .filter(([key, prov]) => {
+        const currentValue = workspaceSettings[key];
+        if (!Array.isArray(currentValue)) return false;
+        return !deepEqual(currentValue, prov.winnerValue);
+      })
+      .map(([key, prov]) => ({
+        key,
+        newArray: workspaceSettings[key] as unknown[],
+        provenance: prov,
+      }));
+  }
+
+  private findSegmentForIndex(
+    segments: ArraySegmentProvenance[],
+    index: number
+  ): ArraySegmentProvenance | null {
+    return (
+      segments.find(
+        (seg) => index >= seg.start && index < seg.start + seg.length
+      ) ?? null
+    );
+  }
+
+  private isParentOwned(sourceFile: string): boolean {
+    const relative = path.relative(this.folderPath, sourceFile);
+    return relative.startsWith("..") || path.isAbsolute(relative);
+  }
+
+  private findAllOccurrences(
+    value: unknown,
+    mergedArray: unknown[],
+    segments: ArraySegmentProvenance[]
+  ): Array<{ index: number; segment: ArraySegmentProvenance }> {
+    return mergedArray
+      .map((el, idx) => ({ el, idx }))
+      .filter(({ el }) => deepEqual(el, value))
+      .map(({ idx }) => {
+        const segment = this.findSegmentForIndex(segments, idx);
+        return segment ? { index: idx, segment } : null;
+      })
+      .filter((item): item is { index: number; segment: ArraySegmentProvenance } => item !== null);
+  }
+
+  private async handleArrayChange(
+    key: string,
+    newArray: unknown[],
+    provenance: KeyProvenance
+  ): Promise<void> {
+    const prevArray = provenance.winnerValue as unknown[];
+    const segments = provenance.arraySegments ?? [];
+
+    log(`handleArrayChange: key="${key}", segments=${segments.length}`);
+
+    const diff = diffArrays(prevArray, newArray);
+
+    log(`handleArrayChange: diff kind="${diff.kind}", removed=${JSON.stringify(diff.removed)}, added=${JSON.stringify(diff.added)}`);
+
+    if (diff.kind === "none") {
+      return;
+    }
+
+    if (diff.kind === "complex") {
+      log(`Array "${key}" is too large for diff-based writeback, skipping`);
+      return;
+    }
+
+    // Transaction check: if ANY removed value exists only in parent files, abort ALL changes
+    for (const removedValue of diff.removed) {
+      const occurrences = this.findAllOccurrences(removedValue, prevArray, segments);
+      const hasNonParentOccurrence = occurrences.some(
+        ({ segment }) => !this.isParentOwned(segment.sourceFile)
+      );
+
+      if (!hasNonParentOccurrence && occurrences.length > 0) {
+        // All occurrences are in parent files - abort entire transaction
+        log(`handleArrayChange: BLOCKING removal of "${removedValue}" - parent-owned`);
+        await this.handleBlockedRemoval(key, removedValue, occurrences[0].segment.sourceFile);
+        await this.revertArrayInSettings(key, prevArray);
+        return;
+      }
+    }
+
+    // Process additions (all go to layered.json)
+    if (diff.added.length > 0) {
+      await this.handleArrayAdditions(key, diff.added);
+    }
+
+    // Process removals (to their respective source files, preferring winner)
+    if (diff.removed.length > 0) {
+      await this.handleArrayRemovals(key, diff.removed, prevArray, segments, provenance.winner);
+    }
+
+    await this.updateExternalBaseline();
+  }
+
+  private async handleArrayAdditions(
+    key: string,
+    added: unknown[]
+  ): Promise<void> {
+    const layeredJsonExisted = this.captureFileManager.layeredJsonExists();
+
+    await this.captureFileManager.appendToArraySetting(key, added);
+    await this.ensureFileInConfig("layered.json");
+
+    // Auto-add to gitignore on first creation
+    if (!layeredJsonExisted && this.backupManager) {
+      await this.backupManager.ensureGitignore(this.folderPath);
+    }
+
+    log(`Captured ${added.length} new element(s) for "${key}" to layered.json`);
+  }
+
+  private async handleArrayRemovals(
+    key: string,
+    removed: unknown[],
+    mergedArray: unknown[],
+    segments: ArraySegmentProvenance[],
+    winnerFile: string
+  ): Promise<void> {
+    // Group removals by source file (prefer winner/child file for duplicates)
+    const removalsByFile = new Map<string, unknown[]>();
+
+    for (const value of removed) {
+      const occurrences = this.findAllOccurrences(value, mergedArray, segments);
+      
+      // Prefer winner file if it has this value, otherwise use first non-parent
+      const winnerOccurrence = occurrences.find(
+        ({ segment }) => segment.sourceFile === winnerFile
+      );
+      const nonParentOccurrence = occurrences.find(
+        ({ segment }) => !this.isParentOwned(segment.sourceFile)
+      );
+      const targetOccurrence = winnerOccurrence ?? nonParentOccurrence;
+
+      if (targetOccurrence) {
+        const file = targetOccurrence.segment.sourceFile;
+        const existing = removalsByFile.get(file) ?? [];
+        removalsByFile.set(file, [...existing, value]);
+      }
+    }
+
+    // Apply removals to each file
+    for (const [filePath, values] of removalsByFile) {
+      for (const value of values) {
+        await this.removeArrayElementFromFile(filePath, key, value);
+      }
+    }
+  }
+
+  private async removeArrayElementFromFile(
+    filePath: string,
+    key: string,
+    elementValue: unknown
+  ): Promise<void> {
+    try {
+      const content = fs.readFileSync(filePath, "utf8");
+      const config: LayeredConfig = JSON.parse(content);
+
+      if (!config.settings || !Array.isArray(config.settings[key])) {
+        return;
+      }
+
+      const arr = config.settings[key] as unknown[];
+      const indexToRemove = arr.findIndex((el) => deepEqual(el, elementValue));
+
+      if (indexToRemove === -1) {
+        return;
+      }
+
+      config.settings[key] = [
+        ...arr.slice(0, indexToRemove),
+        ...arr.slice(indexToRemove + 1),
+      ];
+
+      fs.writeFileSync(filePath, JSON.stringify(config, null, 2));
+      log(`Removed element from "${key}" in ${path.basename(filePath)}`);
+    } catch (error) {
+      console.error(`Failed to remove element from ${filePath}:`, error);
+    }
+  }
+
+  private async handleBlockedRemoval(
+    key: string,
+    elementValue: unknown,
+    sourceFile: string
+  ): Promise<void> {
+    const displayValue =
+      typeof elementValue === "string"
+        ? elementValue
+        : JSON.stringify(elementValue);
+
+    // Don't await - let the message show but don't block the revert
+    vscode.window.showWarningMessage(
+      `Cannot remove "${displayValue}" - defined in root config`,
+      "Open Source File"
+    ).then(async (action) => {
+      if (action === "Open Source File") {
+        const doc = await vscode.workspace.openTextDocument(sourceFile);
+        await vscode.window.showTextDocument(doc);
+      }
+    });
+
+    log(`Blocked removal of "${displayValue}" from "${key}" (owned by ${path.basename(sourceFile)})`);
+  }
+
+  private async revertArrayInSettings(
+    key: string,
+    originalArray: unknown[]
+  ): Promise<void> {
+    this.isApplyingSettings = true;
+
+    try {
+      const config = vscode.workspace.getConfiguration(undefined, this.folder.uri);
+      await config.update(key, originalArray, vscode.ConfigurationTarget.WorkspaceFolder);
+      log(`Reverted "${key}" to original array`);
+    } finally {
+      this.isApplyingSettings = false;
+    }
   }
 
   private async handleOwnedKeyChanges(
@@ -332,6 +604,9 @@ export class SettingsProvider implements ConfigProvider {
           if (!value) return "File name is required";
           if (!value.endsWith(".json")) return "File must end with .json";
           if (value === "config.json") return "Cannot use config.json";
+          if (this.captureFileManager.isReservedName(value)) {
+            return "layered.json is reserved for auto-captured settings";
+          }
           if (existingFiles.includes(value)) return "File already exists";
           if (!/^[\w\-\.]+$/.test(value)) return "Invalid file name";
           return undefined;

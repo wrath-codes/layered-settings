@@ -1,0 +1,13 @@
+{
+  "editor.fontSize": 14,
+  "files.exclude": [
+    "*.log",
+    "*.tmp",
+    "node_modules"
+  ],
+  "editor.tabSize": 2,
+  "editor.rulers": [
+    80,
+    120
+  ]
+}
