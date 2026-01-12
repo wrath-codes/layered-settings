@@ -918,6 +918,313 @@ describe("ConfigMergerCore", () => {
     });
   });
 
+  describe("Enabled Flag", () => {
+    test("enabled: false skips config file", async () => {
+      fileReader.addJsonFile("/config.json", {
+        enabled: false,
+        settings: { tabSize: 4 },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({});
+    });
+
+    test("enabled: false skips extends chain", async () => {
+      fileReader.addJsonFile("/config.json", {
+        enabled: false,
+        extends: ["./base.json"],
+        settings: { tabSize: 4 },
+      });
+      fileReader.addJsonFile("/base.json", {
+        settings: { fromBase: true },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({});
+    });
+
+    test("enabled: true processes normally", async () => {
+      fileReader.addJsonFile("/config.json", {
+        enabled: true,
+        settings: { tabSize: 4 },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({ tabSize: 4 });
+    });
+
+    test("omitted enabled defaults to true (processes normally)", async () => {
+      fileReader.addJsonFile("/config.json", {
+        settings: { tabSize: 4 },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({ tabSize: 4 });
+    });
+
+    test("disabled child in extends array only skips that child", async () => {
+      fileReader.addJsonFile("/config.json", {
+        extends: ["./a.json", "./b.json"],
+        settings: { main: true },
+      });
+      fileReader.addJsonFile("/a.json", {
+        enabled: false,
+        settings: { fromA: true },
+      });
+      fileReader.addJsonFile("/b.json", {
+        settings: { fromB: true },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({
+        fromB: true,
+        main: true,
+      });
+    });
+
+    test("disabled grandparent skips entire chain below it", async () => {
+      fileReader.addJsonFile("/config.json", {
+        extends: "./middle.json",
+        settings: { fromConfig: true },
+      });
+      fileReader.addJsonFile("/middle.json", {
+        enabled: false,
+        extends: "./base.json",
+        settings: { fromMiddle: true },
+      });
+      fileReader.addJsonFile("/base.json", {
+        settings: { fromBase: true },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({ fromConfig: true });
+      expect(merger.getSettings().fromMiddle).toBeUndefined();
+      expect(merger.getSettings().fromBase).toBeUndefined();
+    });
+
+    test("enabled file extending disabled file only skips disabled", async () => {
+      fileReader.addJsonFile("/config.json", {
+        extends: "./disabled.json",
+        settings: { fromConfig: true },
+      });
+      fileReader.addJsonFile("/disabled.json", {
+        enabled: false,
+        extends: "./base.json",
+        settings: { fromDisabled: true },
+      });
+      fileReader.addJsonFile("/base.json", {
+        settings: { fromBase: true },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({ fromConfig: true });
+    });
+
+    test("disabled file not added to extendedFiles", async () => {
+      fileReader.addJsonFile("/config.json", {
+        extends: ["./enabled.json", "./disabled.json"],
+        settings: {},
+      });
+      fileReader.addJsonFile("/enabled.json", {
+        settings: { fromEnabled: true },
+      });
+      fileReader.addJsonFile("/disabled.json", {
+        enabled: false,
+        settings: { fromDisabled: true },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      const extendedFiles = merger.getExtendedFiles();
+      expect(extendedFiles.has("/enabled.json")).toBe(true);
+      expect(extendedFiles.has("/disabled.json")).toBe(true);
+    });
+
+    test("re-enabling a file causes conflicts to be detected", async () => {
+      fileReader.addJsonFile("/config.json", {
+        extends: ["./base.json", "./override.json"],
+        settings: {},
+      });
+      fileReader.addJsonFile("/base.json", {
+        settings: { shared: "base", onlyBase: true },
+      });
+      fileReader.addJsonFile("/override.json", {
+        enabled: false,
+        settings: { shared: "override", onlyOverride: true },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+      expect(merger.getSettings().shared).toBe("base");
+      expect(merger.getConflictedKeys()).not.toContain("shared");
+
+      fileReader.addJsonFile("/override.json", {
+        enabled: true,
+        settings: { shared: "override", onlyOverride: true },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+      expect(merger.getSettings().shared).toBe("override");
+      expect(merger.getConflictedKeys()).toContain("shared");
+
+      const provenance = merger.getProvenance();
+      const sharedProv = provenance.get("shared");
+      expect(sharedProv?.winner).toBe("/override.json");
+      expect(sharedProv?.overrides[0].file).toBe("/base.json");
+    });
+
+    test("re-enabling restores full extends chain", async () => {
+      fileReader.addJsonFile("/config.json", {
+        extends: "./middle.json",
+        settings: { fromConfig: true },
+      });
+      fileReader.addJsonFile("/middle.json", {
+        enabled: false,
+        extends: "./base.json",
+        settings: { fromMiddle: true },
+      });
+      fileReader.addJsonFile("/base.json", {
+        settings: { fromBase: true },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+      expect(merger.getSettings().fromMiddle).toBeUndefined();
+      expect(merger.getSettings().fromBase).toBeUndefined();
+
+      fileReader.addJsonFile("/middle.json", {
+        enabled: true,
+        extends: "./base.json",
+        settings: { fromMiddle: true },
+      });
+
+      await merger.mergeFromConfig("/config.json", "/");
+      expect(merger.getSettings()).toEqual({
+        fromBase: true,
+        fromMiddle: true,
+        fromConfig: true,
+      });
+    });
+  });
+
+  describe("JSONC Support", () => {
+    test("config with single-line comments parses correctly", async () => {
+      fileReader.addFile(
+        "/config.json",
+        `{
+        // This is a comment
+        "settings": {
+          "tabSize": 4 // inline comment
+        }
+      }`
+      );
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({ tabSize: 4 });
+    });
+
+    test("config with block comments parses correctly", async () => {
+      fileReader.addFile(
+        "/config.json",
+        `{
+        /* Block comment */
+        "settings": {
+          "theme": "dark"
+        }
+      }`
+      );
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({ theme: "dark" });
+    });
+
+    test("config with trailing commas parses correctly", async () => {
+      fileReader.addFile(
+        "/config.json",
+        `{
+        "extends": ["./base.json",],
+        "settings": {
+          "tabSize": 4,
+          "theme": "dark",
+        },
+      }`
+      );
+      fileReader.addJsonFile("/base.json", { settings: { fromBase: true } });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({
+        fromBase: true,
+        tabSize: 4,
+        theme: "dark",
+      });
+    });
+
+    test("config with mixed comments and trailing commas", async () => {
+      fileReader.addFile(
+        "/config.json",
+        `{
+        // Root config
+        "extends": [
+          "./base.json", // Base settings
+        ],
+        "settings": {
+          /* Editor settings */
+          "tabSize": 2,
+          "insertSpaces": true, // Always use spaces
+        },
+      }`
+      );
+      fileReader.addJsonFile("/base.json", { settings: { theme: "light" } });
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(merger.getSettings()).toEqual({
+        theme: "light",
+        tabSize: 2,
+        insertSpaces: true,
+      });
+    });
+
+    test("parse error in JSONC still triggers callback", async () => {
+      const parseErrors: string[] = [];
+      callbacks.onParseError = (path) => parseErrors.push(path);
+
+      fileReader.addFile(
+        "/config.json",
+        `{
+        "settings": { "unclosed": }
+      }`
+      );
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(parseErrors).toContain("/config.json");
+      expect(merger.getSettings()).toEqual({});
+    });
+
+    test("JSONC parse error includes offset information", async () => {
+      let capturedError: unknown = null;
+      callbacks.onParseError = (_path, error) => {
+        capturedError = error;
+      };
+
+      fileReader.addFile("/config.json", `{ "key": }`);
+
+      await merger.mergeFromConfig("/config.json", "/");
+
+      expect(capturedError).toBeInstanceOf(Error);
+      expect((capturedError as Error).message).toContain("offset");
+    });
+  });
+
   describe("Nested Object Merging", () => {
     test("nested objects are deep merged (child extends parent)", async () => {
       fileReader.addJsonFile("/base.json", {

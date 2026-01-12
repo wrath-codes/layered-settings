@@ -1,3 +1,4 @@
+import { parse, printParseErrorCode, type ParseError } from "jsonc-parser/lib/esm/main.js";
 import type {
   ArraySegmentProvenance,
   KeyProvenance,
@@ -113,6 +114,11 @@ export class ConfigMergerCore {
 
     const config = this.parseConfigFile(absolutePath);
     if (!config) {
+      this.resolving.delete(absolutePath);
+      return;
+    }
+
+    if (config.enabled === false) {
       this.resolving.delete(absolutePath);
       return;
     }
@@ -268,7 +274,20 @@ export class ConfigMergerCore {
     try {
       const content = this.fileReader.readFile(configPath);
       if (!content) return null;
-      return JSON.parse(content);
+
+      const errors: ParseError[] = [];
+      const result = parse(content, errors, {
+        allowTrailingComma: true,
+        disallowComments: false,
+      });
+
+      if (errors.length > 0 && errors[0]) {
+        const firstError = errors[0];
+        const errorMessage = printParseErrorCode(firstError.error);
+        throw new Error(`${errorMessage} at offset ${firstError.offset}`);
+      }
+
+      return result;
     } catch (error) {
       this.callbacks.onParseError?.(configPath, error);
       return null;

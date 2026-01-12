@@ -54,13 +54,18 @@
     "build": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --no-sourcemap",
     "build:test": "tsc -p tsconfig.test.json",
     "watch": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --no-sourcemap --watch",
-    "test": "bun run build && bun run build:test && vscode-test",
+    "test": "bun run test:unit && bun run test:integration",
+    "test:unit": "bun test",
+    "test:single-root": "bun run build && bun run build:test && vscode-test -l single-root",
+    "test:multi-root": "bun run build && bun run build:test && vscode-test -l parent-owned",
+    "test:integration": "bun run build && bun run build:test && vscode-test",
     "package": "bunx @vscode/vsce package --no-dependencies",
     "publish": "bunx @vscode/vsce publish --no-dependencies",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@layered/core": "workspace:*"
+    "@layered/core": "workspace:*",
+    "jsonc-parser": "^3.2.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

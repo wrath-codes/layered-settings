@@ -1,6 +1,7 @@
 export type Setting = Record<string, unknown>;
 
 export type LayeredConfig = {
+  enabled?: boolean;
   root?: boolean;
   extends?: string | string[];
   settings?: Setting;

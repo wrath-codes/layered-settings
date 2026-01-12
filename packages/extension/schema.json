@@ -4,6 +4,11 @@
   "description": "Configuration file for layered-settings VSCode extension",
   "type": "object",
   "properties": {
+    "enabled": {
+      "type": "boolean",
+      "description": "Set to false to disable this config file and its extends chain",
+      "default": true
+    },
     "root": {
       "type": "boolean",
       "description": "If true, stops looking for parent config files",

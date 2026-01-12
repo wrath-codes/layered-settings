@@ -5,6 +5,7 @@
     "files.autoSave": "afterDelay",
     "test.duplicate": [],
     "editor.rulers": [
+      80,
       100
     ]
   }
