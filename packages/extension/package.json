@@ -46,19 +46,30 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically add layered.json to .gitignore when auto-capturing settings"
+        },
+        "layered-settings.validation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable validation for unknown settings"
+        },
+        "layered-settings.validation.severity": {
+          "type": "string",
+          "enum": ["error", "warning", "information", "hint"],
+          "default": "warning",
+          "description": "Severity level for unknown setting diagnostics"
         }
       }
     }
   },
   "scripts": {
-    "build": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --no-sourcemap",
+    "build": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --external vscode-json-languageservice --no-sourcemap",
     "build:test": "tsc -p tsconfig.test.json",
-    "watch": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --no-sourcemap --watch",
+    "watch": "bun build src/extension.ts --outdir out --target node --format cjs --external vscode --external vscode-json-languageservice --no-sourcemap --watch",
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "bun test",
     "test:single-root": "bun run build && bun run build:test && vscode-test -l single-root",
     "test:multi-root": "bun run build && bun run build:test && vscode-test -l parent-owned",
-    "test:integration": "bun run build && bun run build:test && vscode-test",
+    "test:integration": "bun run test:single-root && bun run test:multi-root",
     "package": "bunx @vscode/vsce package --no-dependencies",
     "publish": "bunx @vscode/vsce publish --no-dependencies",
     "typecheck": "tsc --noEmit"

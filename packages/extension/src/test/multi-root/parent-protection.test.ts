@@ -2,6 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
+import { resetParentOwnedWorkspace } from "../test-workspace";
 
 suite("Parent-Owned Config Protection", () => {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -41,13 +42,26 @@ suite("Parent-Owned Config Protection", () => {
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
   }
 
+  function resetWorkspace(): void {
+    resetParentOwnedWorkspace(configDir, parentConfigDir, settingsPath);
+  }
+
   suiteSetup(async function () {
     this.timeout(30000);
+    resetWorkspace();
     const ext = vscode.extensions.getExtension("wrath-codes.@layered/extension");
     if (ext && !ext.isActive) {
       await ext.activate();
     }
     await sleep(3000);
+  });
+
+  setup(function () {
+    resetWorkspace();
+  });
+
+  suiteTeardown(function () {
+    resetWorkspace();
   });
 
   test("workspace folder exists", () => {

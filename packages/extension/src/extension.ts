@@ -5,6 +5,8 @@ import {
 } from "./core/conflict-manager";
 import { SettingsProvider } from "./providers/settings-provider";
 import { initLogger } from "./utils/logger";
+import { activateSettingsRegistry } from "./core/settings-registry";
+import { activateValidation } from "./core/settings-validation";
 
 const settingsProviders = new Map<string, SettingsProvider>();
 let statusBarItem: vscode.StatusBarItem;
@@ -315,6 +317,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.languages.createDiagnosticCollection("layered-settings");
   context.subscriptions.push(diagnosticCollection);
   initDiagnostics(diagnosticCollection);
+
+  activateSettingsRegistry(context);
+  activateValidation(context);
 
   outputChannel.appendLine("Layered Settings: Activating...");
 

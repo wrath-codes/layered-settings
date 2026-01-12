@@ -25,8 +25,6 @@ const mockRegistry = {
   },
 };
 
-let mockCustomSettings: string[] = [];
-
 function buildSettingsSchema() {
   const settingsProperties: Record<string, unknown> = {};
   const definitions: Record<string, unknown> = {};
@@ -45,10 +43,6 @@ function buildSettingsSchema() {
 
     definitions[defName] = def;
     settingsProperties[meta.key] = { $ref: `#/definitions/${defName}` };
-  }
-
-  for (const key of mockCustomSettings) {
-    settingsProperties[key] = { description: "Custom setting (user allowlist)" };
   }
 
   const languagePattern = {
@@ -99,7 +93,6 @@ function buildSettingsSchema() {
 describe("buildSettingsSchema", () => {
   beforeEach(() => {
     mockRegistry.clear();
-    mockCustomSettings = [];
   });
 
   test("T3.1-U1: schema includes all registry keys with type/description/enum/default", () => {
@@ -151,22 +144,6 @@ describe("buildSettingsSchema", () => {
 
     const props = languagePattern.properties as Record<string, unknown>;
     expect(props["editor.tabSize"]).toEqual({ $ref: "#/definitions/editor_tabSize" });
-  });
-
-  test("T3.1-U3: knownCustomSettings are included in schema", () => {
-    mockCustomSettings = ["myTool.customSetting", "anotherTool.option"];
-
-    const schema = buildSettingsSchema();
-
-    const settingsProps = schema.properties.settings as Record<string, unknown>;
-    const props = settingsProps.properties as Record<string, unknown>;
-
-    expect(props["myTool.customSetting"]).toEqual({
-      description: "Custom setting (user allowlist)",
-    });
-    expect(props["anotherTool.option"]).toEqual({
-      description: "Custom setting (user allowlist)",
-    });
   });
 
   test("T3.1-U4: schema includes enabled, root, extends properties", () => {

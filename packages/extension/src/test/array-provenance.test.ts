@@ -2,6 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
+import { resetSharedWorkspace } from "./test-workspace";
 
 suite("Array Provenance", () => {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -41,8 +42,13 @@ suite("Array Provenance", () => {
     }
   }
 
+  function resetWorkspace(): void {
+    resetSharedWorkspace(configDir, settingsPath);
+  }
+
   suiteSetup(async function () {
     this.timeout(30000);
+    resetWorkspace();
     const ext = vscode.extensions.getExtension("wrath-codes.@layered/extension");
     if (ext && !ext.isActive) {
       await ext.activate();
@@ -50,8 +56,12 @@ suite("Array Provenance", () => {
     await sleep(2000);
   });
 
+  setup(function () {
+    resetWorkspace();
+  });
+
   suiteTeardown(async function () {
-    cleanupLayeredJson();
+    resetWorkspace();
   });
 
   suite("Array Addition Capture", () => {

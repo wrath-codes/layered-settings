@@ -2,6 +2,7 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
+import { resetSharedWorkspace } from "./test-workspace";
 
 suite("Layered Settings Extension", () => {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -12,15 +13,26 @@ suite("Layered Settings Extension", () => {
     ? path.join(workspaceFolder.uri.fsPath, ".vscode", "settings.json")
     : "";
 
+  function resetWorkspace(): void {
+    resetSharedWorkspace(configDir, settingsPath);
+  }
+
   suiteSetup(async function () {
     this.timeout(30000);
-    // Wait for extension to activate
+    resetWorkspace();
     const ext = vscode.extensions.getExtension("wrath-codes.@layered/extension");
     if (ext && !ext.isActive) {
       await ext.activate();
     }
-    // Give it time to process
     await sleep(2000);
+  });
+
+  setup(function () {
+    resetWorkspace();
+  });
+
+  suiteTeardown(function () {
+    resetWorkspace();
   });
 
   test("extension should be present", () => {

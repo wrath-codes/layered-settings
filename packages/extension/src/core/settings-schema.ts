@@ -1,16 +1,12 @@
-import * as vscode from "vscode";
 import type { JSONSchema } from "vscode-json-languageservice";
 import { SettingsRegistry } from "./settings-registry";
 
 export function buildSettingsSchema(): JSONSchema {
-  const config = vscode.workspace.getConfiguration("layered-settings.validation");
-  const customKeys = config.get<string[]>("knownCustomSettings", []);
-
   const settingsProperties: Record<string, JSONSchema> = {};
   const definitions: Record<string, JSONSchema> = {};
 
   for (const meta of SettingsRegistry.getAllSettings()) {
-    const defName = meta.key.replace(/\./g, "_");
+    const defName = meta.key.replace(/[./]/g, "_");
 
     const def: JSONSchema = {};
     if (meta.type) def.type = meta.type as JSONSchema["type"];
@@ -23,10 +19,6 @@ export function buildSettingsSchema(): JSONSchema {
 
     definitions[defName] = def;
     settingsProperties[meta.key] = { $ref: `#/definitions/${defName}` };
-  }
-
-  for (const key of customKeys) {
-    settingsProperties[key] = { description: "Custom setting (user allowlist)" };
   }
 
   const languagePattern: JSONSchema = {
